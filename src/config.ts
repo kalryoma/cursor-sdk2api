@@ -144,7 +144,8 @@ export function loadConfig(overrides: Partial<GatewayConfig> = {}): GatewayConfi
     toolBatchSettleMs: envInt("TOOL_BATCH_SETTLE_MS", 1_500),
     catalogCacheMs: envInt("CATALOG_CACHE_MS", 5 * 60_000),
     sweepIntervalMs: envInt("SWEEP_INTERVAL_MS", 5_000),
-    maxBodyBytes: envInt("MAX_BODY_BYTES", 2 * 1024 * 1024),
+    // OpenCodex Chat Completions history with image tool output exceeds 2 MiB.
+    maxBodyBytes: envInt("MAX_BODY_BYTES", 32 * 1024 * 1024),
     emptyWorkspaceDir: process.env.EMPTY_WORKSPACE_DIR || undefined,
     stateDir: process.env.STATE_DIR?.trim() || join(tmpdir(), "cursor-sdk2api", "state"),
     consoleDir: process.env.CONSOLE_DIR?.trim() || defaultConsoleDir,
