@@ -100,6 +100,15 @@ export function parseModelParams(raw: Record<string, unknown>): Array<{ id: stri
     params.set("effort", effort);
   }
 
+  const serviceTier = typeof raw.service_tier === "string" ? raw.service_tier.trim().toLowerCase() : "";
+  if (serviceTier === "priority" || serviceTier === "fast") {
+    const existing = params.get("fast");
+    if (existing && existing !== "true") {
+      throw invalidRequest("service_tier conflicts with cursor_model_params fast");
+    }
+    params.set("fast", "true");
+  }
+
   return [...params.entries()]
     .map(([id, value]) => ({ id, value }))
     .sort((a, b) => a.id.localeCompare(b.id));

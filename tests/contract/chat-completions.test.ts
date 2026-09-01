@@ -388,6 +388,39 @@ test("reasoning_effort reuses existing model parameter rules", async () => {
   ]);
 });
 
+test("service_tier priority maps to cursor fast", async () => {
+  ctx = await startTestApp({
+    sdk: { scripts: [[{ type: "text", chunks: ["ok"] }]] },
+  });
+  const res = await api(ctx, "/v1/chat/completions", {
+    method: "POST",
+    body: JSON.stringify({
+      model: "gpt-5.6-sol",
+      service_tier: "priority",
+      messages: [{ role: "user", content: "hi" }],
+    }),
+  });
+  expect(res.status).toBe(200);
+  expect(ctx.sdk.lastCreate?.modelId).toBe("gpt-5.6-sol");
+  expect(ctx.sdk.lastCreate?.modelParams).toEqual([{ id: "fast", value: "true" }]);
+});
+
+test("service_tier does not override an explicit cursor fast=false", async () => {
+  ctx = await startTestApp({
+    sdk: { scripts: [[{ type: "text", chunks: ["ok"] }]] },
+  });
+  const res = await api(ctx, "/v1/chat/completions", {
+    method: "POST",
+    body: JSON.stringify({
+      model: "gpt-5.6-sol",
+      service_tier: "priority",
+      cursor_model_params: [{ id: "fast", value: "false" }],
+      messages: [{ role: "user", content: "hi" }],
+    }),
+  });
+  expect(res.status).toBe(400);
+});
+
 test("base64 image_url is forwarded to the SDK", async () => {
   ctx = await startTestApp({
     sdk: { scripts: [[{ type: "text", chunks: ["seen"] }]] },
