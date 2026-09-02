@@ -85,12 +85,15 @@ export function parseModelParams(raw: Record<string, unknown>): Array<{ id: stri
   }
 
   const reasoning = raw.reasoning as Record<string, unknown> | undefined;
+  const outputConfig = raw.output_config as Record<string, unknown> | undefined;
   const effort =
     typeof raw.reasoning_effort === "string"
       ? raw.reasoning_effort
       : reasoning && typeof reasoning.effort === "string"
         ? reasoning.effort
-        : undefined;
+        : outputConfig && typeof outputConfig.effort === "string"
+          ? outputConfig.effort
+          : undefined;
   if (effort) {
     if (effort.length > 128) throw invalidRequest("reasoning_effort is too long");
     const existing = params.get("effort");

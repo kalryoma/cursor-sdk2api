@@ -46,6 +46,7 @@ export interface AnthropicMessagesRequest {
   metadata?: Record<string, unknown>;
   thinking?: unknown;
   reasoning_effort?: string;
+  output_config?: { effort?: string };
   cursor_model_params?: Array<{ id: string; value: string }>;
 }
 

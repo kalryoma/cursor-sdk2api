@@ -1,5 +1,6 @@
 import type { ServerResponse } from "node:http";
 import { afterEach, expect, test } from "vitest";
+import { parseModelParams } from "../../src/protocols/anthropic/parse.js";
 import { createAnthropicWriter } from "../../src/protocols/anthropic/writer.js";
 import { api, closeTestApp, parseSse, startTestApp, type TestContext } from "../helpers/app.js";
 
@@ -59,6 +60,53 @@ test("keeps the public model id and forwards explicit Cursor model parameters", 
     { id: "effort", value: "xhigh" },
     { id: "fast", value: "false" },
   ]);
+});
+
+test("forwards Claude Code output_config effort", async () => {
+  ctx = await startTestApp({
+    sdk: { scripts: [[{ type: "text", chunks: ["ok"] }]] },
+  });
+  const res = await api(ctx, "/v1/messages", {
+    method: "POST",
+    body: JSON.stringify({
+      model: "claude-fable-5-1",
+      output_config: { effort: "max" },
+      max_tokens: 32,
+      messages: [{ role: "user", content: "hi" }],
+    }),
+  });
+  expect(res.status).toBe(200);
+  expect(ctx.sdk.lastCreate?.modelParams).toEqual([{ id: "effort", value: "max" }]);
+});
+
+test("prefers existing effort fields before output_config", () => {
+  expect(
+    parseModelParams({
+      reasoning_effort: "high",
+      reasoning: { effort: "xhigh" },
+      output_config: { effort: "max" },
+    }),
+  ).toEqual([{ id: "effort", value: "high" }]);
+  expect(parseModelParams({ reasoning: { effort: "xhigh" }, output_config: { effort: "max" } })).toEqual([
+    { id: "effort", value: "xhigh" },
+  ]);
+});
+
+test("rejects output_config effort that conflicts with an explicit Cursor parameter", async () => {
+  ctx = await startTestApp({
+    sdk: { scripts: [[{ type: "text", chunks: ["ok"] }]] },
+  });
+  const res = await api(ctx, "/v1/messages", {
+    method: "POST",
+    body: JSON.stringify({
+      model: "claude-fable-5-1",
+      output_config: { effort: "max" },
+      cursor_model_params: [{ id: "effort", value: "high" }],
+      max_tokens: 32,
+      messages: [{ role: "user", content: "hi" }],
+    }),
+  });
+  expect(res.status).toBe(400);
 });
 
 test("completed follow-up inherits model parameters and rejects an explicit change", async () => {
