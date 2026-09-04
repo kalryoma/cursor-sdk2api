@@ -64,6 +64,110 @@ test("one gateway key round-robins new sessions across persistent Cursor account
   expect(ctx.sdk.agents.map((agent) => agent.input.apiKey)).toEqual(["cursor-a", "cursor-b"]);
 });
 
+async function setPaused(context: TestContext, id: string, paused: boolean): Promise<Response> {
+  return fetch(`${context.url}/v0/management/accounts/paused`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id, paused }),
+  });
+}
+
+test("a paused account leaves round-robin routing until it is resumed", async () => {
+  ctx = await startTestApp({
+    config: { authMode: "managed", gatewayAccessKey: "gateway-key", managedCursorKey: undefined },
+    sdk: {
+      modelsByApiKey: {
+        "cursor-a": { ok: true, models: [{ id: "composer-2.5" }] },
+        "cursor-b": { ok: true, models: [{ id: "composer-2.5" }] },
+      },
+    },
+  });
+  const accountA = await addAccount(ctx, "cursor-a");
+  await addAccount(ctx, "cursor-b");
+  expect((await setPaused(ctx, accountA, true)).status).toBe(200);
+
+  for (let index = 0; index < 2; index += 1) {
+    const response = await api(ctx, "/v1/messages", {
+      apiKey: "gateway-key",
+      method: "POST",
+      body: JSON.stringify(messageBody(`paused ${index}`)),
+    });
+    expect(response.status).toBe(200);
+  }
+  expect(ctx.sdk.agents.map((agent) => agent.input.apiKey)).toEqual(["cursor-b", "cursor-b"]);
+
+  expect((await setPaused(ctx, accountA, false)).status).toBe(200);
+  const resumed = await api(ctx, "/v1/messages", {
+    apiKey: "gateway-key",
+    method: "POST",
+    body: JSON.stringify(messageBody("resumed")),
+  });
+  expect(resumed.status).toBe(200);
+  expect(ctx.sdk.agents.map((agent) => agent.input.apiKey)).toEqual(["cursor-b", "cursor-b", "cursor-a"]);
+});
+
+test("a session bound to an account that was paused afterwards still continues on it", async () => {
+  ctx = await startTestApp({
+    config: { authMode: "managed", gatewayAccessKey: "gateway-key", managedCursorKey: undefined },
+    sdk: {
+      modelsByApiKey: {
+        "cursor-a": { ok: true, models: [{ id: "composer-2.5" }] },
+        "cursor-b": { ok: true, models: [{ id: "composer-2.5" }] },
+      },
+      agentScripts: [
+        [
+          [
+            { type: "tools", calls: [{ name: "lookup", input: { q: "weather" }, id: "sdk_paused_tool" }] },
+            { type: "text", chunks: ["continued"] },
+          ],
+        ],
+      ],
+    },
+  });
+  const accountA = await addAccount(ctx, "cursor-a");
+  await addAccount(ctx, "cursor-b");
+
+  const first = await api(ctx, "/v1/messages", {
+    apiKey: "gateway-key",
+    method: "POST",
+    body: JSON.stringify(messageBody("use tool", [weatherTool()])),
+  });
+  const firstBody = (await first.json()) as { content: Array<{ type: string; id?: string }> };
+  const toolId = firstBody.content.find((item) => item.type === "tool_use")?.id;
+  expect(toolId).toBeTruthy();
+  expect(ctx.sdk.agents[0]?.input.apiKey).toBe("cursor-a");
+  expect((await setPaused(ctx, accountA, true)).status).toBe(200);
+
+  const continued = await api(ctx, "/v1/messages", {
+    apiKey: "gateway-key",
+    method: "POST",
+    body: JSON.stringify(messageBody([
+      { type: "tool_result", tool_use_id: toolId, content: "sunny" },
+    ], [weatherTool()])),
+  });
+  expect(continued.status).toBe(200);
+  expect(ctx.sdk.agents.map((agent) => agent.input.apiKey)).toEqual(["cursor-a"]);
+  expect(ctx.sdk.agents[0]?.runs[0]?.capturedToolResults).toEqual(["sunny"]);
+});
+
+test("a fully paused pool reports 503 instead of routing", async () => {
+  ctx = await startTestApp({
+    config: { authMode: "managed", gatewayAccessKey: "gateway-key", managedCursorKey: undefined },
+    sdk: { modelsByApiKey: { "cursor-a": { ok: true, models: [{ id: "composer-2.5" }] } } },
+  });
+  const accountA = await addAccount(ctx, "cursor-a");
+  expect((await setPaused(ctx, accountA, true)).status).toBe(200);
+
+  const response = await api(ctx, "/v1/messages", {
+    apiKey: "gateway-key",
+    method: "POST",
+    body: JSON.stringify(messageBody()),
+  });
+  expect(response.status).toBe(503);
+  expect(await response.text()).toContain("paused");
+  expect(ctx.sdk.agents).toHaveLength(0);
+});
+
 test("managed routing chooses an account whose live catalog contains the requested model", async () => {
   ctx = await startTestApp({
     config: { authMode: "managed", gatewayAccessKey: "gateway-key", managedCursorKey: undefined },

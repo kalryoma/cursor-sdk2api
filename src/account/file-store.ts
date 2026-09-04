@@ -21,6 +21,7 @@ interface AccountFile {
   api_key: string;
   added_at: number;
   default_profile?: RuntimeProfile;
+  paused?: boolean;
 }
 
 export interface StoredCursorAccount {
@@ -29,6 +30,7 @@ export interface StoredCursorAccount {
   addedAt: number;
   keyHint: string;
   defaultProfile: RuntimeProfile;
+  paused: boolean;
 }
 
 const FILE_RE = /^acct_[A-Za-z0-9-]+\.json$/;
@@ -111,12 +113,19 @@ export class CursorAccountFileStore {
   }
 
   setDefaultProfile(id: string, profile: RuntimeProfile): StoredCursorAccount | undefined {
+    return this.update(id, { default_profile: profile });
+  }
+
+  setPaused(id: string, paused: boolean): StoredCursorAccount | undefined {
+    return this.update(id, { paused });
+  }
+
+  private update(id: string, patch: Partial<AccountFile>): StoredCursorAccount | undefined {
     const name = `${id}.json`;
     if (!FILE_RE.test(name)) return undefined;
-    const path = join(this.dir, name);
-    const account = this.read(path);
+    const account = this.read(join(this.dir, name));
     if (!account) return undefined;
-    const next: AccountFile = { ...account, default_profile: profile };
+    const next: AccountFile = { ...account, ...patch };
     this.write(next);
     return this.toPublic(next);
   }
@@ -170,6 +179,7 @@ export class CursorAccountFileStore {
       addedAt: account.added_at,
       keyHint: keyHint(account.api_key),
       defaultProfile: readStoredProfile(account.default_profile),
+      paused: account.paused === true,
     };
   }
 }

@@ -226,4 +226,7 @@ export type HomeCopy = {
   keyPlaceholder: string;
   keyHelp: string;
   remove: string;
+  pause: string;
+  resume: string;
+  paused: string;
 };

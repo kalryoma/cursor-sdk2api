@@ -1,5 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { addManagedAccount, getHealth, getManagedAccounts, probeManagedAccount, removeManagedAccount, runPrompt, setManagedDefaultProfile } from "./api";
+import {
+  addManagedAccount,
+  getHealth,
+  getManagedAccounts,
+  probeManagedAccount,
+  removeManagedAccount,
+  runPrompt,
+  setManagedDefaultProfile,
+  setManagedPaused,
+} from "./api";
 import { go, hrefFor, readRoute, type Route } from "./nav";
 import { RailNav } from "./RailNav";
 import { AccountDetailPage } from "./pages/AccountDetailPage";
@@ -135,6 +144,9 @@ const COPY = {
       keyPlaceholder: "Cursor API key",
       keyHelp: "Stored by the gateway in STATE_DIR/auths with owner-only file permissions.",
       remove: "Remove",
+      pause: "Pause",
+      resume: "Resume",
+      paused: "Paused",
     },
     detail: {
       missing: "Account not found",
@@ -309,6 +321,9 @@ const COPY = {
       keyPlaceholder: "Cursor API Key",
       keyHelp: "账号由网关写入 STATE_DIR/auths，并使用仅属主可读写的文件权限。",
       remove: "移除",
+      pause: "暂停",
+      resume: "恢复",
+      paused: "已暂停",
     },
     detail: {
       missing: "找不到这个账号",
@@ -473,6 +488,7 @@ export function App() {
         id: account.id,
         keyHint: account.key_hint,
         addedAt: account.added_at,
+        paused: account.paused === true,
         testState: "idle",
       }));
       setRoster(next);
@@ -530,7 +546,13 @@ export function App() {
     setAddError("");
     try {
       const account = await addManagedAccount(key);
-      const next: RosterItem = { id: account.id, keyHint: account.key_hint, addedAt: account.added_at, testState: "testing" };
+      const next: RosterItem = {
+        id: account.id,
+        keyHint: account.key_hint,
+        addedAt: account.added_at,
+        paused: account.paused === true,
+        testState: "testing",
+      };
       setRoster((current) => current.some((item) => item.id === next.id) ? current : [...current, next]);
       setActiveId(next.id);
       setDraftKey("");
@@ -558,6 +580,17 @@ export function App() {
       return next;
     });
     if (route.accountId === id) go("accounts");
+  };
+
+  const togglePaused = async (id: string) => {
+    const item = roster.find((entry) => entry.id === id);
+    if (!item) return;
+    try {
+      const account = await setManagedPaused(id, !item.paused);
+      patchRoster(id, { paused: account.paused === true });
+    } catch (error) {
+      setAddError(messageOf(error));
+    }
   };
 
   const setAccountProfile = async (id: string, profile: "sdk" | "sand") => {
@@ -690,6 +723,7 @@ export function App() {
             onAdd={() => void addAccount()}
             onTest={(id) => void testAccount(id)}
             onRemove={(id) => void removeAccount(id)}
+            onTogglePaused={(id) => void togglePaused(id)}
           />
         ) : null}
         {route.page === "account" ? (

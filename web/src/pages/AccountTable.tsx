@@ -18,9 +18,13 @@ export function AccountTable({
   testFail,
   open,
   remove,
+  pause,
+  resume,
+  paused,
   headers,
   onTest,
   onRemove,
+  onTogglePaused,
 }: {
   items: RosterItem[];
   quotaMissing: string;
@@ -34,9 +38,13 @@ export function AccountTable({
   testFail: string;
   open: string;
   remove?: string;
+  pause?: string;
+  resume?: string;
+  paused?: string;
   headers: [string, string, string, string];
   onTest: (id: string) => void;
   onRemove?: (id: string) => void;
+  onTogglePaused?: (id: string) => void;
 }) {
   return (
     <div className="table-wrap">
@@ -67,6 +75,7 @@ export function AccountTable({
                   <a className="row-link" href={hrefFor("account", item.id)}>
                     <strong>{identityLabel(item.account, item.keyHint)}</strong>
                     <span className="sub">{item.account?.identity?.api_key_name || item.keyHint}</span>
+                    {item.paused && paused ? <span className="sub">{paused}</span> : null}
                   </a>
                 </td>
                 <td>
@@ -82,6 +91,11 @@ export function AccountTable({
                       {item.testState === "testing" ? testing : test}
                     </Button>
                     <ActionLink href={hrefFor("account", item.id)}>{open}</ActionLink>
+                    {onTogglePaused && pause && resume ? (
+                      <Button variant="secondary" size="sm" onClick={() => onTogglePaused(item.id)}>
+                        {item.paused ? resume : pause}
+                      </Button>
+                    ) : null}
                     {onRemove && remove ? (
                       <Button variant="quiet" size="sm" onClick={() => onRemove(item.id)}>{remove}</Button>
                     ) : null}

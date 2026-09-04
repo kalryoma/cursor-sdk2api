@@ -115,4 +115,4 @@ Completed follow-up after restart requires the same `STATE_DIR` volume, `x-curso
 
 ## Resource defaults
 
-Development defaults: 4 global active runs, 2 per credential, 30 minute awaiting TTL, 10 minute replay TTL, 60 minute run deadline, and 40 seconds to the first SDK event.
+Development defaults: 8 global active runs, 3 per credential, 30 minute awaiting TTL, 10 minute replay TTL, 60 minute run deadline, and 40 seconds to the first SDK event.

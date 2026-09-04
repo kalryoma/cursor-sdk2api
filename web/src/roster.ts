@@ -6,6 +6,7 @@ export interface RosterItem {
   id: string;
   keyHint: string;
   addedAt: number;
+  paused: boolean;
   testState: TestState;
   testMs?: number;
   testError?: string;
