@@ -196,6 +196,7 @@ export function createApp(input: {
     key_hint: account.keyHint,
     added_at: account.addedAt,
     default_profile: account.defaultProfile,
+    paused: account.paused,
   });
 
   const boundCredentialFingerprint = (parsed: ParsedMessages, sessionHint?: string): string | undefined => {
@@ -233,10 +234,16 @@ export function createApp(input: {
     if (configured.length === 0) {
       throw upstreamError("No Cursor accounts are configured in the gateway pool", 503);
     }
-    let candidates = configured;
+    // Paused accounts are removed from new-run placement only; sessions
+    // already bound to them keep resolving through the branch above.
+    const routable = configured.filter((account) => !account.paused);
+    if (routable.length === 0) {
+      throw upstreamError("All Cursor accounts in the gateway pool are paused", 503);
+    }
+    let candidates = routable;
     if (parsed) {
       const checked = await Promise.all(
-        configured.map(async (account) => ({
+        routable.map(async (account) => ({
           account,
           catalog: await catalog.list(account.apiKey, managedAccountAuth(account.apiKey).fingerprint),
         })),
@@ -529,6 +536,17 @@ export function createApp(input: {
           ...publicAccount(updated),
           account: await accountPayload(updated.apiKey, updated.defaultProfile),
         }, requestId);
+        return;
+      }
+
+      if (path === "/v0/management/accounts/paused" && method === "PUT") {
+        const body = await readJsonBody(req, config.maxBodyBytes) as { id?: unknown; paused?: unknown } | undefined;
+        const id = typeof body?.id === "string" ? body.id.trim() : "";
+        if (!id) throw invalidRequest("id is required");
+        if (typeof body?.paused !== "boolean") throw invalidRequest("paused is invalid");
+        const updated = accounts.setPaused(id, body.paused);
+        if (!updated) throw notFound("Persistent account was not found");
+        sendJson(res, 200, { account: publicAccount(updated) }, requestId);
         return;
       }
 

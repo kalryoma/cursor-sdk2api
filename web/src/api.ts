@@ -5,6 +5,7 @@ export interface ManagementAccount {
   key_hint: string;
   added_at: number;
   default_profile?: "sdk" | "sand";
+  paused?: boolean;
 }
 
 export async function getHealth(): Promise<HealthPayload> {
@@ -51,6 +52,16 @@ export async function setManagedDefaultProfile(
     path: "/default_profile",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ id, default_profile: defaultProfile }),
+  });
+  return body.account;
+}
+
+export async function setManagedPaused(id: string, paused: boolean): Promise<ManagementAccount> {
+  const body = await managementJson<{ account: ManagementAccount }>({
+    method: "PUT",
+    path: "/paused",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id, paused }),
   });
   return body.account;
 }

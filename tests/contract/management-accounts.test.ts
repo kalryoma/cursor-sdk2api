@@ -45,6 +45,39 @@ test("accounts persist across gateway restarts with CPA-style private files", as
   expect(await empty.json()).toMatchObject({ accounts: [] });
 });
 
+test("pause state is validated, listed, and persisted across restarts", async () => {
+  const stateDir = mkdtempSync(join(tmpdir(), "cursor-sdk2api-paused-"));
+  ctx = await startTestApp({ config: { stateDir } });
+  const created = await fetch(`${ctx.url}/v0/management/accounts`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ api_key: "pause-account-key" }),
+  });
+  const { account } = (await created.json()) as { account: { id: string; paused: boolean } };
+  expect(account.paused).toBe(false);
+
+  const setPaused = (body: unknown) => fetch(`${ctx!.url}/v0/management/accounts/paused`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  expect((await setPaused({ id: account.id, paused: "yes" })).status).toBe(400);
+  expect((await setPaused({ id: "acct_missing", paused: true })).status).toBe(404);
+
+  const paused = await setPaused({ id: account.id, paused: true });
+  expect(paused.status).toBe(200);
+  const pausedText = await paused.text();
+  expect(pausedText).not.toContain("pause-account-key");
+  expect(JSON.parse(pausedText)).toMatchObject({ account: { id: account.id, paused: true } });
+
+  await closeTestApp(ctx);
+  ctx = await startTestApp({ config: { stateDir } });
+  const listed = (await (await fetch(`${ctx.url}/v0/management/accounts`)).json()) as {
+    accounts: Array<{ id: string; paused: boolean }>;
+  };
+  expect(listed.accounts).toEqual([expect.objectContaining({ id: account.id, paused: true })]);
+});
+
 test("adding the same Cursor key is idempotent", async () => {
   ctx = await startTestApp();
   const add = () => fetch(`${ctx!.url}/v0/management/accounts`, {

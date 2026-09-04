@@ -14,8 +14,9 @@ export function AccountsPage({
   onAdd,
   onTest,
   onRemove,
+  onTogglePaused,
 }: {
-  t: HomeCopy & { add: string; adding: string; keyPlaceholder: string; keyHelp: string; remove: string };
+  t: HomeCopy;
   draftKey: string;
   addError: string;
   adding: boolean;
@@ -24,6 +25,7 @@ export function AccountsPage({
   onAdd: () => void;
   onTest: (id: string) => void;
   onRemove: (id: string) => void;
+  onTogglePaused: (id: string) => void;
 }) {
   const passed = roster.filter((item) => item.testState === "pass").length;
   const failed = roster.filter((item) => item.testState === "fail").length;
@@ -72,9 +74,13 @@ export function AccountsPage({
           testFail={t.testFail}
           open={t.open}
           remove={t.remove}
+          pause={t.pause}
+          resume={t.resume}
+          paused={t.paused}
           headers={t.headers}
           onTest={onTest}
           onRemove={onRemove}
+          onTogglePaused={onTogglePaused}
         />
       )}
     </PageFrame>

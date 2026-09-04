@@ -45,8 +45,10 @@ Completed follow-up and persisted `Agent.resume` consume the same global / per-c
 
 Managed mode follows CPA's separation of proxy client keys from upstream
 credentials. A valid `GATEWAY_ACCESS_KEY` selects compatible accounts with
-round-robin for new sessions. Pending tool IDs and `x-cursor-session-id` bind
-continuation to the original account, including persisted restart recovery.
+round-robin for new sessions; accounts flagged `paused` (console or
+`PUT /v0/management/accounts/paused`) are skipped for new sessions. Pending
+tool IDs and `x-cursor-session-id` bind continuation to the original account,
+even when it is paused, including persisted restart recovery.
 
 ## Responses continuation identity
 
