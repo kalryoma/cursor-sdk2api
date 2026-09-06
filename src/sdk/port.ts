@@ -89,6 +89,7 @@ export interface SdkCustomTool {
 export type SdkDeltaUpdate =
   | { type: "text-delta"; text: string }
   | { type: "thinking-delta"; text: string }
+  /** End of the agent turn; arrives after custom-tool results, carries that turn's usage. */
   | { type: "turn-ended"; usage?: SdkUsage };
 
 export type SdkDeltaHandler = (update: SdkDeltaUpdate) => void | Promise<void>;

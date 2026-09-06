@@ -1,7 +1,7 @@
 import type { Clock } from "../clock.js";
 import { emptyTurn, sdkFailure, timeoutError, upstreamError } from "../errors.js";
 import { messageId } from "../ids.js";
-import type { AnthropicContentBlock, AssistantTurn } from "../protocols/anthropic/types.js";
+import type { AnthropicContentBlock, AssistantTurn, ToolUseBlock } from "../protocols/anthropic/types.js";
 import type { SdkDeltaUpdate, SdkRun, SdkStreamEvent } from "../sdk/port.js";
 import { deferredUsage, fromSdkUsage } from "./usage.js";
 import type { PendingCall, Session } from "./session.js";
@@ -11,12 +11,32 @@ export type PumpBoundary =
   | { type: "final"; turn: AssistantTurn }
   | { type: "error"; error: unknown };
 
-export type DeltaRecord = { kind: "text" | "thinking"; text: string };
+export type DeltaRecord =
+  | { kind: "text" | "thinking"; text: string }
+  | { kind: "tool_use"; block: ToolUseBlock };
+
+/** How long the batch waited after its last tool callback before closing. */
+export interface BatchClose {
+  waitedMs: number;
+}
 
 export interface ResponseSink {
   onThinking?(text: string): void;
   onText?(text: string): void;
+  /** A client tool call with its final input, emitted as soon as the SDK requests it. */
+  onToolUse?(block: ToolUseBlock): void;
   onBoundary?(boundary: PumpBoundary): void;
+}
+
+function toolUseBlock(call: PendingCall): ToolUseBlock {
+  return {
+    type: "tool_use",
+    id: call.toolUseId,
+    name: call.name,
+    input: call.input,
+    ...(call.toolKind ? { tool_kind: call.toolKind } : {}),
+    ...(call.namespace ? { namespace: call.namespace } : {}),
+  };
 }
 
 export class EventPump {
@@ -37,6 +57,8 @@ export class EventPump {
   /** Once official onDelta is seen, ignore stream assistant/thinking snapshots. */
   private preferOnDelta = false;
   private segmentMessageId = messageId();
+  private lastCallAt?: number;
+  lastBatchClose?: BatchClose;
 
   constructor(
     private readonly session: Session,
@@ -54,7 +76,8 @@ export class EventPump {
   attach(sink: ResponseSink): void {
     this.sinks.add(sink);
     for (const delta of this.deltaHistory) {
-      if (delta.kind === "thinking") sink.onThinking?.(delta.text);
+      if (delta.kind === "tool_use") sink.onToolUse?.(delta.block);
+      else if (delta.kind === "thinking") sink.onThinking?.(delta.text);
       else sink.onText?.(delta.text);
     }
   }
@@ -75,6 +98,7 @@ export class EventPump {
     this.text = "";
     this.thinking = "";
     this.segmentMessageId = messageId();
+    this.lastCallAt = undefined;
   }
 
   currentMessageId(): string {
@@ -95,6 +119,10 @@ export class EventPump {
     this.session.hasSemanticOutput = true;
     this.session.sawToolBatch = true;
     this.openBatch.push(call);
+    this.lastCallAt = this.clock.now();
+    const block = toolUseBlock(call);
+    this.deltaHistory.push({ kind: "tool_use", block });
+    for (const sink of this.sinks) sink.onToolUse?.(block);
     const generation = ++this.settleGeneration;
     const flush = () => {
       if (generation !== this.settleGeneration || this.finished) return;
@@ -122,8 +150,8 @@ export class EventPump {
 
   ingestDelta(update: SdkDeltaUpdate): void {
     if (update.type === "turn-ended") {
-      this.firstEvent = true;
       // Per-turn usage is diagnostic only. Cumulative usage is confirmed via run.wait().
+      this.firstEvent = true;
       return;
     }
     if (update.type !== "text-delta" && update.type !== "thinking-delta") return;
@@ -227,21 +255,16 @@ export class EventPump {
     if (this.openBatch.length === 0 || this.finished) return;
     const batch = this.openBatch;
     this.openBatch = [];
+    // Invalidate any settle timer still pending for this batch.
+    this.settleGeneration += 1;
+    this.lastBatchClose = { waitedMs: this.clock.now() - (this.lastCallAt ?? this.clock.now()) };
+    this.lastCallAt = undefined;
     const blocks: AnthropicContentBlock[] = [];
     if (this.thinking) blocks.push({ type: "thinking", thinking: this.thinking });
     if (this.text) blocks.push({ type: "text", text: this.text });
     this.thinking = "";
     this.text = "";
-    for (const call of batch) {
-      blocks.push({
-        type: "tool_use",
-        id: call.toolUseId,
-        name: call.name,
-        input: call.input,
-        ...(call.toolKind ? { tool_kind: call.toolKind } : {}),
-        ...(call.namespace ? { namespace: call.namespace } : {}),
-      });
-    }
+    for (const call of batch) blocks.push(toolUseBlock(call));
     this.publish({
       type: "tools",
       turn: {

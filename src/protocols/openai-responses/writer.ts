@@ -1,7 +1,7 @@
 import { responseId } from "../../ids.js";
 import type { TurnWriter, TurnWriterContext, TurnWriterFactory } from "../../core/turn-writer.js";
 import { sendJson, sendOpenAIError } from "../../server/http-util.js";
-import type { AnthropicContentBlock, AssistantTurn } from "../anthropic/types.js";
+import type { AssistantTurn, ToolUseBlock } from "../anthropic/types.js";
 import {
   encodeFunctionCallItem,
   encodeCustomToolCallItem,
@@ -25,12 +25,20 @@ class ResponsesTurnWriter implements TurnWriter {
   private nextOutputIndex = 0;
   private reasoning?: StreamItem;
   private message?: StreamItem;
+  private readonly emittedTools = new Set<string>();
   private readonly id: string;
   private readonly createdAt: number;
 
   constructor(private readonly ctx: TurnWriterContext) {
     this.id = responseId(ctx.messageId);
     this.createdAt = Math.floor(ctx.session.createdAt / 1000);
+  }
+
+  onToolUse(block: ToolUseBlock): void {
+    if (!this.ctx.stream || this.dead()) return;
+    this.ensureStart();
+    this.finalizeItems();
+    this.emitToolCall(block);
   }
 
   onThinking(text: string): void {
@@ -104,20 +112,28 @@ class ResponsesTurnWriter implements TurnWriter {
       if (text) this.onText(text);
     }
     this.finalizeItems();
-    const tools = turn.blocks.filter(
-      (block): block is Extract<AnthropicContentBlock, { type: "tool_use" }> => block.type === "tool_use",
-    );
-    for (const block of tools) {
-      if (block.tool_kind === "custom") this.emitCustomToolCall(block);
-      else this.emitFunctionCall(block);
+    for (const block of turn.blocks) {
+      if (block.type === "tool_use" && !this.emittedTools.has(block.id)) this.emitToolCall(block);
     }
   }
 
+  private emitToolCall(block: ToolUseBlock): void {
+    this.emittedTools.add(block.id);
+    if (block.tool_kind === "custom") this.emitCustomToolCall(block);
+    else this.emitFunctionCall(block);
+  }
+
+  /** Items reopened after a mid-stream tool call get their own id. */
+  private itemSeed(previous: StreamItem | undefined, outputIndex: number): string {
+    return previous ? `${this.ctx.messageId}_${outputIndex}` : this.ctx.messageId;
+  }
+
   private ensureReasoning(): StreamItem {
-    if (this.reasoning) return this.reasoning;
+    if (this.reasoning && !this.reasoning.done) return this.reasoning;
     const outputIndex = this.nextOutputIndex++;
-    const itemId = reasoningItemId(this.ctx.messageId);
-    const item = { ...encodeReasoningItem(this.ctx.messageId, ""), summary: [] };
+    const seed = this.itemSeed(this.reasoning, outputIndex);
+    const itemId = reasoningItemId(seed);
+    const item = { ...encodeReasoningItem(seed, ""), summary: [] };
     this.emit("response.output_item.added", { output_index: outputIndex, item });
     this.emit("response.reasoning_summary_part.added", {
       item_id: itemId,
@@ -125,14 +141,14 @@ class ResponsesTurnWriter implements TurnWriter {
       summary_index: 0,
       part: { type: "summary_text", text: "" },
     });
-    this.reasoning = { outputIndex, itemId, text: "", done: false };
+    this.reasoning = { outputIndex, itemId, seed, text: "", done: false };
     return this.reasoning;
   }
 
   private ensureMessage(): StreamItem {
-    if (this.message) return this.message;
+    if (this.message && !this.message.done) return this.message;
     const outputIndex = this.nextOutputIndex++;
-    const itemId = this.ctx.messageId;
+    const itemId = this.itemSeed(this.message, outputIndex);
     this.emit("response.output_item.added", {
       output_index: outputIndex,
       item: encodeMessageItem(itemId, "", "in_progress"),
@@ -143,7 +159,7 @@ class ResponsesTurnWriter implements TurnWriter {
       content_index: 0,
       part: { type: "output_text", text: "", annotations: [] },
     });
-    this.message = { outputIndex, itemId, text: "", done: false };
+    this.message = { outputIndex, itemId, seed: itemId, text: "", done: false };
     return this.message;
   }
 
@@ -167,7 +183,7 @@ class ResponsesTurnWriter implements TurnWriter {
     });
     this.emit("response.output_item.done", {
       output_index: open.outputIndex,
-      item: encodeReasoningItem(this.ctx.messageId, open.text),
+      item: encodeReasoningItem(open.seed, open.text),
     });
     open.done = true;
   }
@@ -192,7 +208,7 @@ class ResponsesTurnWriter implements TurnWriter {
     open.done = true;
   }
 
-  private emitFunctionCall(block: Extract<AnthropicContentBlock, { type: "tool_use" }>): void {
+  private emitFunctionCall(block: ToolUseBlock): void {
     const outputIndex = this.nextOutputIndex++;
     const itemId = functionCallItemId(block.id);
     const argumentsJson = JSON.stringify(block.input ?? {});
@@ -223,7 +239,7 @@ class ResponsesTurnWriter implements TurnWriter {
     });
   }
 
-  private emitCustomToolCall(block: Extract<AnthropicContentBlock, { type: "tool_use" }>): void {
+  private emitCustomToolCall(block: ToolUseBlock): void {
     const outputIndex = this.nextOutputIndex++;
     const itemId = functionCallItemId(block.id);
     const record = block.input && typeof block.input === "object" ? block.input as Record<string, unknown> : {};
@@ -278,6 +294,8 @@ class ResponsesTurnWriter implements TurnWriter {
 interface StreamItem {
   outputIndex: number;
   itemId: string;
+  /** Message id the item ids derive from; differs only for reopened items. */
+  seed: string;
   text: string;
   done: boolean;
 }

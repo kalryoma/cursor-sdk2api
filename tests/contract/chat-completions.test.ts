@@ -340,6 +340,51 @@ test("stream tool_calls are JSON-string arguments on the boundary chunk", async 
   expect((finish?.choices as Array<{ finish_reason?: string }>)?.[0]?.finish_reason).toBe("tool_calls");
 });
 
+test("stream emits each tool_call as it arrives with increasing index and no boundary duplicate", async () => {
+  ctx = await startTestApp({
+    config: { toolBatchSettleMs: 5_000 },
+    sdk: {
+      scripts: [
+        [
+          { type: "text", chunks: ["checking"] },
+          {
+            type: "tools",
+            calls: [
+              { name: "lookup", input: { q: "a" } },
+              { name: "beta", input: { n: 2 }, delayMs: 20 },
+            ],
+          },
+          { type: "text", chunks: ["both"] },
+        ],
+      ],
+    },
+  });
+  const res = await api(ctx, "/v1/chat/completions", {
+    method: "POST",
+    body: JSON.stringify({
+      model: "composer-2.5",
+      stream: true,
+      messages: [{ role: "user", content: "do both" }],
+      tools,
+    }),
+  });
+  const frames = parseChatSse(await res.text()).filter(isRecord);
+  const choice = (chunk: Record<string, unknown>) =>
+    (chunk.choices as Array<{ delta?: { content?: string; tool_calls?: Array<{ index: number; function: { name: string } }> }; finish_reason?: string | null }>)?.[0];
+  const toolChunks = frames.filter((chunk) => Array.isArray(choice(chunk)?.delta?.tool_calls));
+  expect(toolChunks).toHaveLength(2);
+  expect(toolChunks.flatMap((chunk) => choice(chunk)?.delta?.tool_calls ?? []).map((call) => [call.index, call.function.name])).toEqual([
+    [0, "lookup"],
+    [1, "beta"],
+  ]);
+  const textIndex = frames.findIndex((chunk) => choice(chunk)?.delta?.content === "checking");
+  const finishIndex = frames.findIndex((chunk) => Boolean(choice(chunk)?.finish_reason));
+  expect(textIndex).toBeGreaterThanOrEqual(0);
+  expect(frames.indexOf(toolChunks[0]!)).toBeGreaterThan(textIndex);
+  expect(finishIndex).toBeGreaterThan(frames.indexOf(toolChunks[1]!));
+  expect(choice(frames[finishIndex]!)?.finish_reason).toBe("tool_calls");
+});
+
 test("include_usage emits a choices=[] usage chunk before [DONE]", async () => {
   ctx = await startTestApp({
     sdk: {

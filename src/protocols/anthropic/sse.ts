@@ -1,7 +1,7 @@
 import type { ServerResponse } from "node:http";
 import { writeSse } from "../../server/http-util.js";
 import { encodeMessage, encodeUsage } from "./encode.js";
-import type { AnthropicContentBlock, AssistantTurn } from "./types.js";
+import type { AssistantTurn, ToolUseBlock } from "./types.js";
 
 export function beginSse(res: ServerResponse, requestId: string, sessionId?: string): void {
   res.writeHead(200, {
@@ -67,7 +67,7 @@ export function writeThinkingDelta(res: ServerResponse, index: number, text: str
   return true;
 }
 
-export function writeToolUse(res: ServerResponse, index: number, block: Extract<AnthropicContentBlock, { type: "tool_use" }>): void {
+export function writeToolUse(res: ServerResponse, index: number, block: ToolUseBlock): void {
   writeSse(res, "content_block_start", {
     type: "content_block_start",
     index,

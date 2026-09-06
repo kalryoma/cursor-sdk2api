@@ -14,7 +14,7 @@ import {
   writeThinkingDelta,
   writeToolUse,
 } from "./sse.js";
-import type { AssistantTurn } from "./types.js";
+import type { AssistantTurn, ToolUseBlock } from "./types.js";
 
 export function createAnthropicWriter(ctx: TurnWriterContext): TurnWriter {
   return new AnthropicTurnWriter(ctx);
@@ -26,8 +26,17 @@ class AnthropicTurnWriter implements TurnWriter {
   private nextIndex = 0;
   private open?: { kind: "thinking" | "text"; index: number };
   private emitted = new Set<"thinking" | "text">();
+  private readonly emittedTools = new Set<string>();
 
   constructor(private readonly ctx: TurnWriterContext) {}
+
+  onToolUse(block: ToolUseBlock): void {
+    if (!this.ctx.stream || this.dead()) return;
+    this.ensureStart();
+    this.closeOpen();
+    writeToolUse(this.ctx.res, this.nextIndex++, block);
+    this.emittedTools.add(block.id);
+  }
 
   onThinking(text: string): void {
     if (!this.ctx.stream || this.dead()) return;
@@ -74,7 +83,7 @@ class AnthropicTurnWriter implements TurnWriter {
         writeTextDelta(this.ctx.res, index, block.text, false);
         writeBlockStop(this.ctx.res, index);
         this.emitted.add("text");
-      } else if (block.type === "tool_use") {
+      } else if (block.type === "tool_use" && !this.emittedTools.has(block.id)) {
         writeToolUse(this.ctx.res, this.nextIndex++, block);
       }
     }

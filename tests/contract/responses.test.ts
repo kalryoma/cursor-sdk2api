@@ -521,6 +521,49 @@ test("stream function_call arguments are JSON on the done event", async () => {
   });
 });
 
+test("stream emits each function_call item when the SDK requests it and closes the open message first", async () => {
+  ctx = await startTestApp({
+    config: { toolBatchSettleMs: 5_000 },
+    sdk: {
+      scripts: [
+        [
+          { type: "text", chunks: ["checking"] },
+          {
+            type: "tools",
+            calls: [
+              { name: "lookup", input: { q: "a" } },
+              { name: "beta", input: { n: 2 }, delayMs: 20 },
+            ],
+          },
+          { type: "text", chunks: ["both"] },
+        ],
+      ],
+    },
+  });
+  const res = await api(ctx, "/v1/responses", {
+    method: "POST",
+    body: JSON.stringify({ model: "composer-2.5", stream: true, input: "do both", tools }),
+  });
+  const events = parseSse(await res.text());
+  const sequences = events.map((event) => (isRecord(event.data) ? event.data.sequence_number : undefined));
+  expect(sequences).toEqual(sequences.map((_, index) => index));
+  const added = events
+    .filter((event) => event.event === "response.output_item.added")
+    .map((event) => (isRecord(event.data) && isRecord(event.data.item) ? event.data.item : {}))
+    .map((item) => [item.type, item.name]);
+  expect(added).toEqual([
+    ["message", undefined],
+    ["function_call", "lookup"],
+    ["function_call", "beta"],
+  ]);
+  const names = events.map((event) => event.event);
+  expect(names.indexOf("response.output_item.done")).toBeLessThan(names.indexOf("response.function_call_arguments.done"));
+  expect(names.filter((name) => name === "response.function_call_arguments.done")).toHaveLength(2);
+  const completed = events.at(-1)?.data;
+  const output = isRecord(completed) && isRecord(completed.response) ? (completed.response.output as unknown[]) : [];
+  expect(outputOfType({ output }, "function_call").map((item) => item.name)).toEqual(["lookup", "beta"]);
+});
+
 test("reasoning_effort reuses existing model parameter rules", async () => {
   ctx = await startTestApp({
     sdk: { scripts: [[{ type: "text", chunks: ["ok"] }]] },

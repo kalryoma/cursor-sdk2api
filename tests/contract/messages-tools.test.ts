@@ -170,6 +170,111 @@ test("staggered same-turn callbacks still settle into one parallel batch", async
   ]);
 });
 
+async function firstToolTurn(ctx: TestContext): Promise<{ names: string[]; elapsedMs: number }> {
+  const started = Date.now();
+  const res = await api(ctx, "/v1/messages", {
+    method: "POST",
+    body: JSON.stringify({
+      model: "composer-2.5",
+      max_tokens: 32,
+      messages: [{ role: "user", content: "do both" }],
+      tools,
+    }),
+  });
+  const elapsedMs = Date.now() - started;
+  const turn = (await res.json()) as { content: Array<{ type: string; name?: string }> };
+  expect(res.status).toBe(200);
+  return {
+    names: turn.content.filter((block) => block.type === "tool_use").map((block) => block.name ?? "").sort(),
+    elapsedMs,
+  };
+}
+
+test("the settle timer restarts on each callback so a staggered batch stays whole", async () => {
+  ctx = await startTestApp({
+    config: { toolBatchSettleMs: 100 },
+    sdk: {
+      scripts: [
+        [
+          {
+            type: "tools",
+            calls: [
+              { name: "lookup", input: { q: "a" } },
+              { name: "beta", input: { n: 2 }, delayMs: 50 },
+            ],
+          },
+          { type: "text", chunks: ["both"] },
+        ],
+      ],
+    },
+  });
+  const turn = await firstToolTurn(ctx);
+  expect(turn.names).toEqual(["beta", "lookup"]);
+  expect(turn.elapsedMs).toBeGreaterThanOrEqual(140);
+});
+
+async function readTimedSse(res: Response): Promise<Array<{ event: string; data: Record<string, unknown>; at: number }>> {
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  const events: Array<{ event: string; data: Record<string, unknown>; at: number }> = [];
+  let buffer = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let separator = buffer.indexOf("\n\n");
+    while (separator !== -1) {
+      const lines = buffer.slice(0, separator).split("\n");
+      buffer = buffer.slice(separator + 2);
+      separator = buffer.indexOf("\n\n");
+      const event = lines.find((line) => line.startsWith("event:"))?.slice(6).trim() ?? "message";
+      const data = lines.find((line) => line.startsWith("data:"))?.slice(5).trim() ?? "{}";
+      events.push({ event, data: JSON.parse(data) as Record<string, unknown>, at: Date.now() });
+    }
+  }
+  return events;
+}
+
+test("SSE writes the tool_use block when the SDK requests the tool, before the batch closes", async () => {
+  ctx = await startTestApp({
+    config: { toolBatchSettleMs: 400 },
+    sdk: {
+      scripts: [
+        [
+          { type: "text", chunks: ["checking"] },
+          { type: "tools", calls: [{ name: "lookup", input: { q: "a" } }] },
+          { type: "text", chunks: ["done"] },
+        ],
+      ],
+    },
+  });
+  const res = await api(ctx, "/v1/messages", {
+    method: "POST",
+    body: JSON.stringify({
+      model: "composer-2.5",
+      max_tokens: 32,
+      stream: true,
+      messages: [{ role: "user", content: "go" }],
+      tools,
+    }),
+  });
+  const events = await readTimedSse(res);
+  const toolStart = events.find(
+    (item) => item.event === "content_block_start" && (item.data.content_block as { type?: string })?.type === "tool_use",
+  );
+  const stop = events.find((item) => item.event === "message_stop");
+  expect(toolStart).toBeDefined();
+  expect(stop).toBeDefined();
+  expect(stop!.at - toolStart!.at).toBeGreaterThanOrEqual(250);
+  expect(events.filter((item) => item.event === "content_block_start").map((item) => (item.data.content_block as { type: string }).type)).toEqual([
+    "text",
+    "tool_use",
+  ]);
+  const stopIndexes = events.filter((item) => item.event === "content_block_stop").map((item) => item.data.index);
+  expect(stopIndexes).toEqual([0, 1]);
+  expect((events.find((item) => item.event === "message_delta")?.data.delta as { stop_reason?: string })?.stop_reason).toBe("tool_use");
+});
+
 test("a callback arriving after the published batch fails closed instead of becoming hidden pending state", async () => {
   ctx = await startTestApp({
     config: { toolBatchSettleMs: 10 },

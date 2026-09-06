@@ -11,6 +11,7 @@ import {
   type SdkAgent,
   type SdkCatalogResult,
   type SdkCustomTool,
+  type SdkDeltaUpdate,
   type SdkRun,
   type SdkRunResult,
   type SdkRuntime,
@@ -158,6 +159,20 @@ function wrapRun(run: Run, options: { suppressMessageDeltas: boolean }): SdkRun 
   };
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+}
+
+function mapDeltaUpdate(raw: unknown): SdkDeltaUpdate | undefined {
+  const update = asRecord(raw);
+  if (update.type === "text-delta" || update.type === "thinking-delta") {
+    return { type: update.type, text: String(update.text ?? "") };
+  }
+  if (update.type !== "turn-ended") return undefined;
+  const usage = mapUsage(update.usage);
+  return usage ? { type: "turn-ended", usage } : { type: "turn-ended" };
+}
+
 function wrapSdkAgent(agent: SDKAgent, fallbackTools: Record<string, SdkCustomTool>): SdkAgent {
   return {
     agentId: agent.agentId,
@@ -171,21 +186,11 @@ function wrapSdkAgent(agent: SDKAgent, fallbackTools: Record<string, SdkCustomTo
           {
           local: { customTools: customTools as never, force: sendInput.force === true },
           onDelta: hasDeltaSink
-            ? async ({ update }: { update: { type?: string; text?: string; usage?: unknown } }) => {
-                if (update.type === "text-delta" || update.type === "thinking-delta") {
-                  const payload = { type: update.type, text: String(update.text ?? "") } as const;
-                  await sendInput.onDelta?.(payload);
-                  await sendInput.onEvent?.(payload);
-                  return;
-                }
-                if (update.type === "turn-ended") {
-                  const usage = mapUsage(update.usage);
-                  const payload = usage
-                    ? ({ type: "turn-ended", usage } as const)
-                    : ({ type: "turn-ended" } as const);
-                  await sendInput.onDelta?.(payload);
-                  await sendInput.onEvent?.(payload);
-                }
+            ? async ({ update }: { update: unknown }) => {
+                const payload = mapDeltaUpdate(update);
+                if (!payload) return;
+                await sendInput.onDelta?.(payload);
+                await sendInput.onEvent?.(payload);
               }
             : undefined,
           },

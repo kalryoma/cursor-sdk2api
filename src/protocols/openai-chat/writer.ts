@@ -1,7 +1,7 @@
 import { chatCompletionId } from "../../ids.js";
 import type { TurnWriter, TurnWriterContext, TurnWriterFactory } from "../../core/turn-writer.js";
 import { sendJson, sendOpenAIError } from "../../server/http-util.js";
-import type { AnthropicContentBlock, AssistantTurn } from "../anthropic/types.js";
+import type { AnthropicContentBlock, AssistantTurn, ToolUseBlock } from "../anthropic/types.js";
 import { encodeChatChunk, encodeChatCompletion, encodeChatToolCall, encodeChatUsage, mapChatFinishReason } from "./encode.js";
 import { beginChatSse, writeChatDone, writeChatFrame, writeChatStreamError } from "./sse.js";
 
@@ -14,6 +14,8 @@ class ChatTurnWriter implements TurnWriter {
   private roleSent = false;
   private emittedText = false;
   private emittedThinking = false;
+  private toolIndex = 0;
+  private readonly emittedTools = new Set<string>();
   private readonly completionId: string;
   private readonly created: number;
 
@@ -23,6 +25,12 @@ class ChatTurnWriter implements TurnWriter {
   ) {
     this.completionId = chatCompletionId(ctx.messageId);
     this.created = Math.floor(ctx.session.createdAt / 1000);
+  }
+
+  onToolUse(block: ToolUseBlock): void {
+    if (!this.ctx.stream || this.dead()) return;
+    this.ensureStart();
+    this.writeToolCalls([block]);
   }
 
   onThinking(text: string): void {
@@ -98,24 +106,20 @@ class ChatTurnWriter implements TurnWriter {
       const text = textOf(turn.blocks, "text");
       if (text) this.writeDelta({ content: text });
     }
-    const tools = turn.blocks.filter(
-      (block): block is Extract<AnthropicContentBlock, { type: "tool_use" }> => block.type === "tool_use",
+    this.writeToolCalls(
+      turn.blocks.filter(
+        (block): block is ToolUseBlock => block.type === "tool_use" && !this.emittedTools.has(block.id),
+      ),
     );
-    if (tools.length === 0) return;
-    writeChatFrame(
-      this.ctx.res,
-      encodeChatChunk({
-        id: this.completionId,
-        created: this.created,
-        model: this.ctx.session.modelId,
-        delta: {
-          tool_calls: tools.map((block, index) => ({
-            index,
-            ...encodeChatToolCall(block),
-          })),
-        },
-      }),
-    );
+  }
+
+  private writeToolCalls(blocks: ToolUseBlock[]): void {
+    if (blocks.length === 0) return;
+    const toolCalls = blocks.map((block) => {
+      this.emittedTools.add(block.id);
+      return { index: this.toolIndex++, ...encodeChatToolCall(block) };
+    });
+    this.writeDelta({ tool_calls: toolCalls });
   }
 
   private writeDelta(delta: Record<string, unknown>): void {

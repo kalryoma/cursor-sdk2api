@@ -22,7 +22,11 @@ export type FakeStep =
   | { type: "text"; chunks: string[]; pauseBetweenMs?: number; early?: boolean }
   | { type: "thinking"; chunks: string[]; early?: boolean }
   | { type: "send-tools"; calls: Array<{ name: string; input: Record<string, unknown>; id?: string }> }
-  | { type: "tools"; calls: Array<{ name: string; input: Record<string, unknown>; id?: string; delayMs?: number }> }
+  | {
+      type: "tools";
+      /** `delayMs` staggers a call's dispatch, as the live SDK does between calls of one generation. */
+      calls: Array<{ name: string; input: Record<string, unknown>; id?: string; delayMs?: number }>;
+    }
   | { type: "silent-final"; text: string }
   | { type: "empty" }
   | { type: "error"; message: string }
@@ -47,6 +51,8 @@ export interface FakeSdkOptions {
   /** Invoke these custom tools synchronously inside resumeAgent(), before the Agent is returned. */
   resumeEarlyToolCalls?: Array<{ name: string; input: Record<string, unknown>; id?: string }>;
 }
+
+type FakeToolStep = Extract<FakeStep, { type: "tools" }>;
 
 function configuredError(input: { message: string; name?: string }): Error {
   const error = new Error(input.message);
@@ -138,6 +144,29 @@ export class FakeRun implements SdkRun {
     await this.onDelta?.(update);
   }
 
+  /**
+   * Mirrors the live SDK: calls of one generation are dispatched one after
+   * another (optionally staggered by `delayMs`) and the run only proceeds once
+   * every execute() promise has resolved. No delta marks the end of the batch.
+   */
+  private async runToolStep(step: FakeToolStep): Promise<void> {
+    const calls = step.calls.map((call) => ({ ...call, id: call.id ?? `sdk_${randomUUID()}` }));
+    const results = calls.map((call) =>
+      (async () => {
+        if (call.delayMs) await new Promise((resolve) => setTimeout(resolve, call.delayMs));
+        const tool = this.tools[call.name];
+        if (!tool) throw new Error(`fake sdk missing tool ${call.name}`);
+        return Promise.resolve(tool.execute(call.input, { toolCallId: call.id }));
+      })().then((result) => {
+        this.capturedToolResults.push(result);
+        return result;
+      }),
+    );
+    // Rejections are observed by Promise.all(results) below; keep them handled meanwhile.
+    for (const result of results) void result.catch(() => undefined);
+    await Promise.all(results);
+  }
+
   stream(): AsyncIterable<SdkStreamEvent> {
     this.streamStarts += 1;
     if (this.streamStarts > 1) {
@@ -189,18 +218,7 @@ export class FakeRun implements SdkRun {
             this.events.push(snapshot);
           }
         } else if (step.type === "tools") {
-          const promises = step.calls.map(async (call) => {
-            if (call.delayMs) await new Promise((resolve) => setTimeout(resolve, call.delayMs));
-            const tool = this.tools[call.name];
-            if (!tool) throw new Error(`fake sdk missing tool ${call.name}`);
-            return Promise.resolve(
-              tool.execute(call.input, { toolCallId: call.id ?? `sdk_${randomUUID()}` }),
-            ).then((result) => {
-              this.capturedToolResults.push(result);
-              return result;
-            });
-          });
-          await Promise.all(promises);
+          await this.runToolStep(step);
         } else if (step.type === "silent-final") {
           finalText = step.text;
         } else if (step.type === "empty") {

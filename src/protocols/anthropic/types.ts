@@ -22,6 +22,8 @@ export type AnthropicContentBlock =
       is_error?: boolean;
     };
 
+export type ToolUseBlock = Extract<AnthropicContentBlock, { type: "tool_use" }>;
+
 export interface AnthropicMessage {
   role: AnthropicRole;
   content: string | AnthropicContentBlock[];
