@@ -31,22 +31,34 @@ export async function freeLoopbackPort(): Promise<number> {
   return port;
 }
 
-export async function startChildGateway(input: {
+export interface ChildGatewayOptions {
   repoRoot: string;
   distEntry: string;
   canaries: string[];
   readyTimeoutMs?: number;
-}): Promise<ChildGateway> {
+  /** Extra gateway environment (e.g. TOOL_BATCH_SETTLE_MS); never the API key. */
+  env?: Record<string, string>;
+  /** Receives each redacted stdout/stderr line; implies info-level logs. */
+  onLog?: (line: string) => void;
+}
+
+export async function startChildGateway(input: ChildGatewayOptions): Promise<ChildGateway> {
   const stateDir = mkdtempSync(join(tmpdir(), "cursor-sdk2api-smoke-state-"));
   const workspaceDir = mkdtempSync(join(tmpdir(), "cursor-sdk2api-smoke-ws-"));
   let port = await freeLoopbackPort();
-  let child = spawnChild({
-    distEntry: input.distEntry,
-    repoRoot: input.repoRoot,
-    port,
-    stateDir,
-    workspaceDir,
-  });
+  const spawnOptions = { distEntry: input.distEntry, repoRoot: input.repoRoot, stateDir, workspaceDir, env: input.env };
+  const attachLogs = (child: ChildProcess) => {
+    if (!input.onLog) return;
+    const forward = (chunk: Buffer) => {
+      for (const line of redactSecrets(chunk.toString(), input.canaries).split("\n")) {
+        if (line.trim()) input.onLog?.(line);
+      }
+    };
+    child.stdout?.on("data", forward);
+    child.stderr?.on("data", forward);
+  };
+  let child = spawnChild({ ...spawnOptions, port, logLevel: input.onLog ? "info" : "error" });
+  attachLogs(child);
 
   const readyTimeoutMs = input.readyTimeoutMs ?? 15_000;
   try {
@@ -67,26 +79,16 @@ export async function startChildGateway(input: {
     async restart() {
       await stopProcess(child);
       port = await freeLoopbackPort();
-      child = spawnChild({
-        distEntry: input.distEntry,
-        repoRoot: input.repoRoot,
-        port,
-        stateDir,
-        workspaceDir,
-      });
+      child = spawnChild({ ...spawnOptions, port, logLevel: input.onLog ? "info" : "error" });
+      attachLogs(child);
       await waitHealth(`http://127.0.0.1:${port}`, readyTimeoutMs, child, input.canaries);
     },
     async restartWithoutLineage() {
       await stopProcess(child);
       rmSync(join(stateDir, "lineage"), { recursive: true, force: true });
       port = await freeLoopbackPort();
-      child = spawnChild({
-        distEntry: input.distEntry,
-        repoRoot: input.repoRoot,
-        port,
-        stateDir,
-        workspaceDir,
-      });
+      child = spawnChild({ ...spawnOptions, port, logLevel: input.onLog ? "info" : "error" });
+      attachLogs(child);
       await waitHealth(`http://127.0.0.1:${port}`, readyTimeoutMs, child, input.canaries);
     },
     async stop() {
@@ -106,18 +108,21 @@ function spawnChild(input: {
   port: number;
   stateDir: string;
   workspaceDir: string;
+  logLevel: string;
+  env?: Record<string, string>;
 }): ChildProcess {
   const child = spawn(process.execPath, [input.distEntry], {
     cwd: input.repoRoot,
     env: {
       PATH: process.env.PATH,
       NODE_ENV: "test",
+      ...(input.env ?? {}),
       HOST: "127.0.0.1",
       PORT: String(input.port),
       AUTH_MODE: "byok",
       STATE_DIR: input.stateDir,
       EMPTY_WORKSPACE_DIR: input.workspaceDir,
-      LOG_LEVEL: "error",
+      LOG_LEVEL: input.logLevel,
       DEBUG_PAYLOADS: "false",
       ...proxyEnvironment(process.env),
     },

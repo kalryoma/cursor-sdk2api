@@ -12,7 +12,18 @@ export CURSOR_LIVE_SMOKE=1
 export CURSOR_API_KEY=...   # do not commit; do not paste into chat
 npm run live:smoke
 npm run live:ordinary   # exact-lineage ordinary follow-up only
+npm run live:timing     # where a tool round spends its time
 ```
+
+`live:timing` records, per model and protocol, the first SSE byte, the first
+and last tool item, the stop event, and the gateway's own round timings
+(`agent_ready_ms`, `first_sdk_event_ms`, `batch_close_wait_ms`, ...). It
+forwards `TOOL_BATCH_SETTLE_MS`, `TOOL_BATCH_IDLE_MS`, `HOST_SYSTEM_PROMPT_MODE`,
+and `SSE_HEARTBEAT_MS` into the child gateway so variants can be compared with
+the same models, tools, and prompts. Set `TOOL_BATCH_SETTLE_MS=10000` to make a
+batch closed by anything other than the settle timer stand out.
+`LIVE_TIMING_PROTOCOL_MODEL` picks the model for the Chat and Responses cases
+(default: the first requested model).
 
 Optional:
 
