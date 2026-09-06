@@ -1024,6 +1024,8 @@ export class RunCoordinator {
       requestId,
       session,
       messageId: pump.currentMessageId(),
+      clock: this.deps.clock,
+      heartbeatMs: this.deps.config.sseHeartbeatMs,
     });
     pump.attach(writer);
     pump.start();
@@ -1223,6 +1225,8 @@ export class RunCoordinator {
       requestId,
       session: replay.writerSession,
       messageId: turn.messageId,
+      clock: this.deps.clock,
+      heartbeatMs: this.deps.config.sseHeartbeatMs,
     });
     writer.finish(turn, { replayed: true });
   }

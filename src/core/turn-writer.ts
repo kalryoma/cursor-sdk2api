@@ -1,4 +1,5 @@
 import type { ServerResponse } from "node:http";
+import type { Clock } from "../clock.js";
 import type { AnthropicContentBlock, AssistantTurn, ToolUseBlock } from "../protocols/anthropic/types.js";
 import type { ResponseSink } from "./event-pump.js";
 import type { Session } from "./session.js";
@@ -6,6 +7,28 @@ import type { Session } from "./session.js";
 export interface TurnWriter extends ResponseSink {
   finish(turn: AssistantTurn, extra?: { replayed?: boolean }): void;
   fail(error: unknown): void;
+}
+
+/**
+ * Keep a started SSE response alive through silent stretches such as a long
+ * tool-call generation. It never runs before the first protocol event, so
+ * pre-semantic recovery, which requires unsent headers, is unaffected.
+ */
+export function startHeartbeat(ctx: TurnWriterContext, write: () => void): () => void {
+  if (ctx.heartbeatMs <= 0) return () => undefined;
+  const controller = new AbortController();
+  void (async () => {
+    try {
+      while (!controller.signal.aborted) {
+        await ctx.clock.sleep(ctx.heartbeatMs, controller.signal);
+        if (ctx.res.destroyed || ctx.res.writableEnded) return;
+        write();
+      }
+    } catch {
+      // Aborted: the response finished or failed.
+    }
+  })();
+  return () => controller.abort();
 }
 
 /** What a streaming writer has already put on the wire for the current turn. */
@@ -56,6 +79,8 @@ export interface TurnWriterContext {
   session: TurnWriterSession;
   stream: boolean;
   messageId: string;
+  clock: Clock;
+  heartbeatMs: number;
 }
 
 export type TurnWriterFactory = (ctx: TurnWriterContext) => TurnWriter;

@@ -1,6 +1,6 @@
 import { chatCompletionId } from "../../ids.js";
-import { unwrittenTail, type TurnWriter, type TurnWriterContext, type TurnWriterFactory } from "../../core/turn-writer.js";
-import { sendJson, sendOpenAIError } from "../../server/http-util.js";
+import { startHeartbeat, unwrittenTail, type TurnWriter, type TurnWriterContext, type TurnWriterFactory } from "../../core/turn-writer.js";
+import { sendJson, sendOpenAIError, writeSseComment } from "../../server/http-util.js";
 import type { AssistantTurn, ToolUseBlock } from "../anthropic/types.js";
 import { encodeChatChunk, encodeChatCompletion, encodeChatToolCall, encodeChatUsage, mapChatFinishReason } from "./encode.js";
 import { beginChatSse, writeChatDone, writeChatFrame, writeChatStreamError } from "./sse.js";
@@ -18,6 +18,7 @@ class ChatTurnWriter implements TurnWriter {
   private readonly emittedTools = new Set<string>();
   private readonly completionId: string;
   private readonly created: number;
+  private stopHeartbeat: () => void = () => undefined;
 
   constructor(
     private readonly ctx: TurnWriterContext,
@@ -56,6 +57,7 @@ class ChatTurnWriter implements TurnWriter {
   }
 
   finish(turn: AssistantTurn, extra?: { replayed?: boolean }): void {
+    this.stopHeartbeat();
     if (!this.ctx.stream) {
       if (!this.dead()) {
         sendJson(this.ctx.res, 200, encodeChatCompletion(turn, this.created, extra?.replayed ? { replayed: true } : {}), this.ctx.requestId, {
@@ -66,6 +68,7 @@ class ChatTurnWriter implements TurnWriter {
     }
     if (this.dead()) return;
     this.ensureStart();
+    this.stopHeartbeat();
     this.emitRemaining(turn);
     writeChatFrame(
       this.ctx.res,
@@ -95,6 +98,7 @@ class ChatTurnWriter implements TurnWriter {
   }
 
   fail(error: unknown): void {
+    this.stopHeartbeat();
     if (this.dead()) return;
     if (this.ctx.stream && this.ctx.res.headersSent) {
       writeChatStreamError(this.ctx.res, error, this.ctx.requestId);
@@ -145,6 +149,7 @@ class ChatTurnWriter implements TurnWriter {
     if (!this.started) {
       this.started = true;
       beginChatSse(this.ctx.res, this.ctx.requestId, this.ctx.session.sessionId);
+      this.stopHeartbeat = startHeartbeat(this.ctx, () => writeSseComment(this.ctx.res, "ping"));
     }
     if (this.roleSent) return;
     this.roleSent = true;

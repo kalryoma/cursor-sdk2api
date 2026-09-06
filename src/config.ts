@@ -33,6 +33,8 @@ export interface GatewayConfig {
   firstEventTimeoutMs: number;
   ordinaryTurnCoordinator: boolean;
   toolBatchSettleMs: number;
+  /** SSE keep-alive interval once a stream has started; 0 disables. */
+  sseHeartbeatMs: number;
   catalogCacheMs: number;
   sweepIntervalMs: number;
   maxBodyBytes: number;
@@ -142,6 +144,7 @@ export function loadConfig(overrides: Partial<GatewayConfig> = {}): GatewayConfi
       envBool("CURSOR_AGENT_TURN_COORDINATOR", true),
     ),
     toolBatchSettleMs: envInt("TOOL_BATCH_SETTLE_MS", 1_500),
+    sseHeartbeatMs: envInt("SSE_HEARTBEAT_MS", 15_000),
     catalogCacheMs: envInt("CATALOG_CACHE_MS", 5 * 60_000),
     sweepIntervalMs: envInt("SWEEP_INTERVAL_MS", 5_000),
     // OpenCodex Chat Completions history with image tool output exceeds 2 MiB.

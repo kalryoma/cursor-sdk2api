@@ -1,6 +1,6 @@
 import { responseId } from "../../ids.js";
-import { unwrittenTail, type TurnWriter, type TurnWriterContext, type TurnWriterFactory } from "../../core/turn-writer.js";
-import { sendJson, sendOpenAIError } from "../../server/http-util.js";
+import { startHeartbeat, unwrittenTail, type TurnWriter, type TurnWriterContext, type TurnWriterFactory } from "../../core/turn-writer.js";
+import { sendJson, sendOpenAIError, writeSseComment } from "../../server/http-util.js";
 import type { AssistantTurn, ToolUseBlock } from "../anthropic/types.js";
 import {
   encodeFunctionCallItem,
@@ -32,6 +32,7 @@ class ResponsesTurnWriter implements TurnWriter {
   private readonly emittedTools = new Set<string>();
   private readonly id: string;
   private readonly createdAt: number;
+  private stopHeartbeat: () => void = () => undefined;
 
   constructor(private readonly ctx: TurnWriterContext) {
     this.id = responseId(ctx.messageId);
@@ -85,6 +86,7 @@ class ResponsesTurnWriter implements TurnWriter {
   }
 
   finish(turn: AssistantTurn, extra?: { replayed?: boolean }): void {
+    this.stopHeartbeat();
     if (!this.ctx.stream) {
       if (!this.dead()) {
         sendJson(
@@ -99,6 +101,7 @@ class ResponsesTurnWriter implements TurnWriter {
     }
     if (this.dead()) return;
     this.ensureStart();
+    this.stopHeartbeat();
     this.emitRemaining(turn);
     this.emit(
       "response.completed",
@@ -110,6 +113,7 @@ class ResponsesTurnWriter implements TurnWriter {
   }
 
   fail(error: unknown): void {
+    this.stopHeartbeat();
     if (this.dead()) return;
     if (this.ctx.stream && this.ctx.res.headersSent) {
       writeResponsesStreamError(this.ctx.res, error, this.ctx.requestId, this.sequence++);
@@ -301,6 +305,8 @@ class ResponsesTurnWriter implements TurnWriter {
     });
     this.emit("response.created", { response });
     this.emit("response.in_progress", { response });
+    // A comment line carries no sequence number, so numbering stays contiguous.
+    this.stopHeartbeat = startHeartbeat(this.ctx, () => writeSseComment(this.ctx.res, "ping"));
   }
 
   private dead(): boolean {

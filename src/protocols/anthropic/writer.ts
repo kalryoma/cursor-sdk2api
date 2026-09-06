@@ -1,6 +1,6 @@
-import { unwrittenTail, type TurnWriter, type TurnWriterContext } from "../../core/turn-writer.js";
+import { startHeartbeat, unwrittenTail, type TurnWriter, type TurnWriterContext } from "../../core/turn-writer.js";
 import { toPublicErrorBody } from "../../errors.js";
-import { sendError, sendJson } from "../../server/http-util.js";
+import { sendError, sendJson, writeSse } from "../../server/http-util.js";
 import { encodeMessage } from "./encode.js";
 import {
   beginSse,
@@ -28,6 +28,7 @@ class AnthropicTurnWriter implements TurnWriter {
   private writtenText = 0;
   private writtenThinking = 0;
   private readonly emittedTools = new Set<string>();
+  private stopHeartbeat: () => void = () => undefined;
 
   constructor(private readonly ctx: TurnWriterContext) {}
 
@@ -50,6 +51,7 @@ class AnthropicTurnWriter implements TurnWriter {
   }
 
   finish(turn: AssistantTurn, extra?: { replayed?: boolean }): void {
+    this.stopHeartbeat();
     if (!this.ctx.stream) {
       if (!this.dead()) {
         sendJson(
@@ -68,6 +70,7 @@ class AnthropicTurnWriter implements TurnWriter {
       return;
     }
     this.ensureStart();
+    this.stopHeartbeat();
     const tail = unwrittenTail(turn.blocks, {
       textChars: this.writtenText,
       thinkingChars: this.writtenThinking,
@@ -83,6 +86,7 @@ class AnthropicTurnWriter implements TurnWriter {
   }
 
   fail(error: unknown): void {
+    this.stopHeartbeat();
     if (this.failed || this.dead()) return;
     this.failed = true;
     if (this.ctx.stream && this.ctx.res.headersSent) {
@@ -138,6 +142,8 @@ class AnthropicTurnWriter implements TurnWriter {
       model: this.ctx.session.modelId,
       sessionId: this.ctx.session.sessionId,
     });
+    // Same shape the Anthropic API sends between events; clients already ignore it.
+    this.stopHeartbeat = startHeartbeat(this.ctx, () => writeSse(this.ctx.res, "ping", { type: "ping" }));
   }
 
   private dead(): boolean {
