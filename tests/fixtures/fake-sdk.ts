@@ -28,6 +28,8 @@ export type FakeStep =
       calls: Array<{ name: string; input: Record<string, unknown>; id?: string; delayMs?: number }>;
       /** Text the model emits after requesting the tools, while their results are still pending. */
       trailingText?: string[];
+      /** Delay before the trailing text; longer than the settle timer puts it after the batch closed. */
+      trailingTextDelayMs?: number;
     }
   | { type: "silent-final"; text: string }
   | { type: "empty" }
@@ -180,6 +182,9 @@ export class FakeRun implements SdkRun {
     );
     // Rejections are observed by Promise.all(results) below; keep them handled meanwhile.
     for (const result of results) void result.catch(() => undefined);
+    if (step.trailingText?.length && step.trailingTextDelayMs) {
+      await new Promise((resolve) => setTimeout(resolve, step.trailingTextDelayMs));
+    }
     for (const chunk of step.trailingText ?? []) {
       await this.emitDelta({ type: "text-delta", text: chunk });
       const snapshot = { type: "assistant" as const, text: chunk };

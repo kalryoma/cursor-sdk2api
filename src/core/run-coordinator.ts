@@ -857,7 +857,10 @@ export class RunCoordinator {
       throw sessionLost("Session is not waiting for tool results");
     }
 
-    const required = new Set(session.unresolvedIds());
+    // The client owes results for the batch it was shown; calls the SDK dispatched
+    // after that batch closed are carried into the next segment by the pump.
+    const published = session.pump.publishedToolIds();
+    const required = new Set(published.length > 0 ? published : session.unresolvedIds());
     const provided = new Set(ids);
     const missing = [...required].filter((id) => !provided.has(id));
     const unknown = [...provided].filter((id) => !required.has(id));
@@ -1270,6 +1273,12 @@ export class RunCoordinator {
     if (!sdkAgentId) return;
     const ttl =
       session.state === "failed" ? this.deps.config.replayTtlMs : this.deps.config.sessionTtlMs;
+    // Only the batch the client has seen is recoverable; a carried call the
+    // client never received is re-issued by the model after a restart if needed.
+    const shown = session.pump?.publishedToolIds() ?? [];
+    const pendingCalls = [...session.pending.values()].filter(
+      (call) => shown.length === 0 || shown.includes(call.toolUseId),
+    );
     const record: LineageRecord = {
       version: 2,
       sessionId: session.sessionId,
@@ -1282,10 +1291,10 @@ export class RunCoordinator {
       runtimeProfile: session.runtimeProfile,
       state: session.state as LineageRecord["state"],
       pendingToolIds:
-        session.state === "awaiting_tool_results" ? [...session.pending.keys()] : [],
+        session.state === "awaiting_tool_results" ? pendingCalls.map((call) => call.toolUseId) : [],
       ...(session.state === "awaiting_tool_results"
         ? {
-            pendingCalls: [...session.pending.values()].map((call) => ({
+            pendingCalls: pendingCalls.map((call) => ({
               toolUseId: call.toolUseId,
               name: call.name,
             })),

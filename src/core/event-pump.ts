@@ -30,6 +30,8 @@ export interface SegmentTiming {
   lastToolAt?: number;
   publishedAt?: number;
   toolCount: number;
+  /** Calls that arrived after the previous batch closed and opened this segment. */
+  carriedCount?: number;
 }
 
 export interface ResponseSink {
@@ -92,6 +94,15 @@ export class EventPump {
   private preferOnDelta = false;
   private segmentMessageId = messageId();
   private lastCallAt?: number;
+  /**
+   * SDK output that arrived after the current batch had already been
+   * published, in arrival order. Tool calls open the next segment as its own
+   * batch instead of failing the session, so a debounce that closed one call
+   * too early costs the client one extra round trip and no model call; text
+   * and thinking head that segment's journal. Closing the HTTP response never
+   * discards model output.
+   */
+  private carried: Array<{ kind: "text" | "thinking"; text: string } | { kind: "tool"; call: PendingCall }> = [];
   lastBatchClose?: BatchClose;
   timing: SegmentTiming;
 
@@ -136,6 +147,7 @@ export class EventPump {
             tool_count: t.toolCount,
             tool_spread_ms: t.lastToolAt !== undefined && t.firstToolAt !== undefined ? t.lastToolAt - t.firstToolAt : undefined,
             batch_close_wait_ms: this.lastBatchClose?.waitedMs,
+            carried_count: t.carriedCount,
           }
         : {}),
     };
@@ -160,33 +172,42 @@ export class EventPump {
     this.lastBatchClose = undefined;
     const now = this.clock.now();
     this.timing = { startedAt: now, agentReadyAt: now, toolCount: 0 };
+    if (this.carried.length === 0) return;
+    const carried = this.carried;
+    this.carried = [];
+    let calls = 0;
+    for (const item of carried) {
+      if (item.kind === "tool") {
+        this.openCall(item.call);
+        calls += 1;
+      } else {
+        this.record(item.kind, item.text);
+      }
+    }
+    if (calls === 0) return;
+    // The SDK is still waiting on these, so no new generation can interleave:
+    // publish them as the whole next batch without waiting on anything.
+    this.timing.carriedCount = calls;
+    this.flushToolBatch();
   }
 
   currentMessageId(): string {
     return this.segmentMessageId;
   }
 
+  /** Tool ids of the batch the client has been shown for this segment. */
+  publishedToolIds(): string[] {
+    if (this.publishedBoundary?.type !== "tools") return [];
+    return this.publishedBoundary.turn.blocks.filter((block) => block.type === "tool_use").map((block) => block.id);
+  }
+
   notifyTool(call: PendingCall): void {
     if (this.publishedBoundary?.type === "tools") {
-      call.resolved = true;
-      const error = upstreamError("SDK emitted a tool call after the assistant tool batch closed");
-      call.reject(error);
-      this.session.state = "failed";
-      void this.run.cancel().catch(() => undefined);
-      this.fail(error);
+      this.carried.push({ kind: "tool", call });
       return;
     }
     this.markFirstEvent();
-    this.session.hasSemanticOutput = true;
-    this.session.sawToolBatch = true;
-    this.openBatch.push(call);
-    this.lastCallAt = this.clock.now();
-    this.timing.firstToolAt ??= this.lastCallAt;
-    this.timing.lastToolAt = this.lastCallAt;
-    this.timing.toolCount += 1;
-    const block = toolUseBlock(call);
-    this.deltaHistory.push({ kind: "tool_use", block });
-    this.deliver((sink) => sink.onToolUse?.(block));
+    this.openCall(call);
     const generation = ++this.settleGeneration;
     const flush = () => {
       if (generation !== this.settleGeneration || this.finished) return;
@@ -235,6 +256,20 @@ export class EventPump {
     this.timing.firstEventAt ??= this.clock.now();
   }
 
+  /** Add a call to the open batch, the journal, and attached sinks. */
+  private openCall(call: PendingCall): void {
+    this.session.hasSemanticOutput = true;
+    this.session.sawToolBatch = true;
+    this.openBatch.push(call);
+    this.lastCallAt = this.clock.now();
+    this.timing.firstToolAt ??= this.lastCallAt;
+    this.timing.lastToolAt = this.lastCallAt;
+    this.timing.toolCount += 1;
+    const block = toolUseBlock(call);
+    this.deltaHistory.push({ kind: "tool_use", block });
+    this.deliver((sink) => sink.onToolUse?.(block));
+  }
+
   /** Fan one event out to attached sinks and stamp the first client-visible write. */
   private deliver(send: (sink: ResponseSink) => void): void {
     if (this.sinks.size > 0) this.timing.firstDeliveryAt ??= this.clock.now();
@@ -243,11 +278,14 @@ export class EventPump {
 
   /**
    * Append one delta to the segment journal and fan it out. Text that trails a
-   * closed tool batch belongs to a response that has already ended; it is
-   * dropped rather than leaking into the next segment.
+   * closed tool batch belongs to a response that has already ended, so it is
+   * carried to the head of the next segment instead.
    */
   private record(kind: "text" | "thinking", text: string): void {
-    if (this.publishedBoundary?.type === "tools") return;
+    if (this.publishedBoundary?.type === "tools") {
+      this.carried.push({ kind, text });
+      return;
+    }
     this.session.hasSemanticOutput = true;
     this.deltaHistory.push({ kind, text });
     this.deliver((sink) => (kind === "thinking" ? sink.onThinking?.(text) : sink.onText?.(text)));

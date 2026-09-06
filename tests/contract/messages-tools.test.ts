@@ -1,3 +1,6 @@
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
 import { api, closeTestApp, startTestApp, weatherTool, type TestContext } from "../helpers/app.js";
 
@@ -403,52 +406,127 @@ test("deltas and tool callbacks that fire before send() resolves keep their rela
   expect(replayed.content.map((block) => block.text ?? block.name)).toEqual(["BEFORE", "lookup", "AFTER"]);
 });
 
-test("a callback arriving after the published batch fails closed instead of becoming hidden pending state", async () => {
+const lateBatchScript = [
+  [
+    {
+      type: "tools" as const,
+      calls: [
+        { name: "lookup", input: { q: "a" } },
+        { name: "beta", input: { n: 2 }, delayMs: 60 },
+      ],
+    },
+    { type: "text" as const, chunks: ["both-done"] },
+  ],
+];
+
+async function toolResultTurn(ctx: TestContext, id: string, content: string, stream = false): Promise<Response> {
+  return api(ctx, "/v1/messages", {
+    method: "POST",
+    body: JSON.stringify({
+      model: "composer-2.5",
+      max_tokens: 32,
+      stream,
+      messages: [{ role: "user", content: [{ type: "tool_result", tool_use_id: id, content }] }],
+      tools,
+    }),
+  });
+}
+
+test("a call arriving after the published batch is carried into the next tool turn instead of failing the session", async () => {
+  ctx = await startTestApp({ captureLogs: true, config: { toolBatchSettleMs: 10 }, sdk: { scripts: lateBatchScript } });
+  const first = await api(ctx, "/v1/messages", {
+    method: "POST",
+    body: JSON.stringify({ model: "composer-2.5", max_tokens: 32, messages: [{ role: "user", content: "do both" }], tools }),
+  });
+  const turn = (await first.json()) as { content: Array<{ type: string; id?: string; name?: string }>; stop_reason: string };
+  expect(first.status).toBe(200);
+  expect(turn.content.filter((block) => block.type === "tool_use").map((block) => block.name)).toEqual(["lookup"]);
+  const lookupId = turn.content.find((block) => block.type === "tool_use")?.id ?? "";
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  // The late call opens the next segment immediately: no SDK wait, no failure.
+  const carried = await toolResultTurn(ctx, lookupId, "ok", true);
+  const events = await readTimedSse(carried);
+  expect(carried.status).toBe(200);
+  const carriedTools = events
+    .filter((item) => item.event === "content_block_start" && (item.data.content_block as { type?: string }).type === "tool_use")
+    .map((item) => (item.data.content_block as { name: string; id: string }));
+  expect(carriedTools.map((block) => block.name)).toEqual(["beta"]);
+  expect((events.find((item) => item.event === "message_delta")?.data.delta as { stop_reason?: string })?.stop_reason).toBe("tool_use");
+  const awaiting = ctx.logs
+    .map((line) => JSON.parse(line) as { fields: Record<string, unknown>; message: string })
+    .filter((entry) => entry.message === "awaiting tool results");
+  expect(awaiting[1]?.fields.carried_count).toBe(1);
+  expect(awaiting[1]?.fields.tool_count).toBe(1);
+  expect(ctx.sdk.agents[0]?.runs[0]?.capturedToolResults).toEqual(["ok"]);
+
+  const final = await toolResultTurn(ctx, carriedTools[0]!.id, "second");
+  const body = (await final.json()) as { content: Array<{ type: string; text?: string }>; stop_reason: string };
+  expect(final.status).toBe(200);
+  expect(body.stop_reason).toBe("end_turn");
+  expect(body.content.map((block) => block.text)).toEqual(["both-done"]);
+  expect(ctx.sdk.agents[0]?.runs[0]?.capturedToolResults).toEqual(["ok", "second"]);
+});
+
+test("text the model emits after the batch closed heads the next response instead of being dropped", async () => {
   ctx = await startTestApp({
-    config: { toolBatchSettleMs: 10 },
+    captureLogs: true,
+    config: { toolBatchSettleMs: 20 },
     sdk: {
       scripts: [
         [
-          {
-            type: "tools",
-            calls: [
-              { name: "lookup", input: { q: "a" } },
-              { name: "beta", input: { n: 2 }, delayMs: 40 },
-            ],
-          },
-          { type: "text", chunks: ["must-not-complete"] },
+          { type: "tools", calls: [{ name: "lookup", input: { q: "a" } }], trailingText: ["late "], trailingTextDelayMs: 120 },
+          { type: "text", chunks: ["done"] },
         ],
       ],
     },
   });
   const first = await api(ctx, "/v1/messages", {
     method: "POST",
-    body: JSON.stringify({
-      model: "composer-2.5",
-      max_tokens: 32,
-      messages: [{ role: "user", content: "do both" }],
-      tools,
-    }),
+    body: JSON.stringify({ model: "composer-2.5", max_tokens: 32, messages: [{ role: "user", content: "go" }], tools }),
   });
-  const turn = (await first.json()) as { content: Array<{ type: string; id?: string }> };
-  const visible = turn.content.find((block) => block.type === "tool_use")?.id;
-  expect(first.status).toBe(200);
-  expect(visible).toBeTruthy();
-  await new Promise((resolve) => setTimeout(resolve, 80));
+  const turn = (await first.json()) as { content: Array<{ type: string; id?: string }>; stop_reason: string };
+  expect(turn.stop_reason).toBe("tool_use");
+  expect(turn.content.map((block) => block.type)).toEqual(["tool_use"]);
+  // The late text lands after the batch was published and before results are posted.
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  const next = await toolResultTurn(ctx, turn.content[0]?.id ?? "", "ok", true);
+  const events = await readTimedSse(next);
+  expect(next.status).toBe(200);
+  const text = events
+    .filter((item) => item.event === "content_block_delta")
+    .map((item) => (item.data.delta as { text?: string }).text ?? "")
+    .join("");
+  expect(text).toBe("late done");
+  expect((events.find((item) => item.event === "message_delta")?.data.delta as { stop_reason?: string })?.stop_reason).toBe("end_turn");
+  const awaiting = ctx.logs
+    .map((line) => JSON.parse(line) as { fields: Record<string, unknown>; message: string })
+    .filter((entry) => entry.message === "awaiting tool results");
+  // Carried text alone does not open a tool batch: one round, no carried_count.
+  expect(awaiting).toHaveLength(1);
+  expect(awaiting[0]?.fields.carried_count).toBeUndefined();
+});
 
-  const continued = await api(ctx, "/v1/messages", {
+test("a carried call never enters the persisted pending batch, so restart recovery still matches what the client saw", async () => {
+  const stateDir = mkdtempSync(join(tmpdir(), "cursor-sdk2api-carried-"));
+  ctx = await startTestApp({ config: { stateDir, toolBatchSettleMs: 10 }, sdk: { scripts: lateBatchScript } });
+  const first = await api(ctx, "/v1/messages", {
     method: "POST",
-    body: JSON.stringify({
-      model: "composer-2.5",
-      max_tokens: 32,
-      messages: [
-        { role: "user", content: [{ type: "tool_result", tool_use_id: visible, content: "ok" }] },
-      ],
-      tools,
-    }),
+    body: JSON.stringify({ model: "composer-2.5", max_tokens: 32, messages: [{ role: "user", content: "do both" }], tools }),
   });
-  expect(continued.status).toBe(409);
-  expect(((await continued.json()) as { error: { type: string } }).error.type).toBe("cursor_session_lost");
+  const turn = (await first.json()) as { cursor_session_id: string; content: Array<{ type: string; id?: string }> };
+  const lookupId = turn.content.find((block) => block.type === "tool_use")?.id ?? "";
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  const lineage = JSON.parse(readFileSync(join(stateDir, "lineage", `${turn.cursor_session_id}.json`), "utf8")) as {
+    pendingToolIds: string[];
+  };
+  expect(lineage.pendingToolIds).toEqual([lookupId]);
+  await closeTestApp(ctx);
+
+  ctx = await startTestApp({ config: { stateDir }, sdk: { scripts: [[{ type: "text", chunks: ["recovered"] }]] } });
+  const recovered = await toolResultTurn(ctx, lookupId, "ok");
+  expect(recovered.status).toBe(200);
+  expect(ctx.sdk.resumeCalls).toHaveLength(1);
 });
 
 test("multi-round tools stay on the same SDK run", async () => {
