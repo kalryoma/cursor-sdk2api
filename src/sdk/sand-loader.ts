@@ -253,7 +253,7 @@ export function resolveInstalledCursorSdkDir(): string {
   }
   const fallback = join(process.cwd(), "node_modules", "@cursor", "sdk");
   if (existsSync(join(fallback, "package.json"))) return fallback;
-  throw mismatch("missing_file", "Refusing Sand SDK loader: installed @cursor/sdk 1.0.30 was not found", {
+  throw mismatch("missing_file", "Refusing Sand SDK loader: installed @cursor/sdk 1.0.31 was not found", {
     file: "node_modules/@cursor/sdk",
   });
 }

@@ -37,8 +37,8 @@ test("sdk and sand isolate store and workspace directories", () => {
 
 test("inspectSandLoader reports ready without leaking filesystem paths", () => {
   const health = inspectSandLoader();
-  expect(health.sdk_version).toBe("1.0.30");
-  expect(health.patch_contract_version).toBe("1.0.30");
+  expect(health.sdk_version).toBe("1.0.31");
+  expect(health.patch_contract_version).toBe("1.0.31");
   expect(JSON.stringify(health)).not.toMatch(/\/Users\/|node_modules|sand-sdk/);
 });
 
@@ -61,8 +61,8 @@ test("Sand run is refused when the loader is not ready", async () => {
     config: { runtimePolicy: { defaultProfile: "sand", allowRequestOverride: false, hostedSearchMode: "off" } },
     sandHealth: {
       ready: false,
-      sdk_version: "1.0.30",
-      patch_contract_version: "1.0.30",
+      sdk_version: "1.0.31",
+      patch_contract_version: "1.0.31",
       reason: "original_hash",
     },
     assertSandAccess: async () => undefined,

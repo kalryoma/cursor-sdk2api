@@ -131,7 +131,7 @@ export function loadConfig(overrides: Partial<GatewayConfig> = {}): GatewayConfi
     gatewayAccessKey: process.env.GATEWAY_ACCESS_KEY || undefined,
     instanceId: instanceId(process.env.INSTANCE_ID),
     version: process.env.GATEWAY_VERSION?.trim() || PACKAGE_VERSION,
-    sdkVersion: "1.0.30",
+    sdkVersion: "1.0.31",
     globalActiveRuns: envInt("GLOBAL_ACTIVE_RUNS", 8),
     perCredentialActiveRuns: envInt("PER_CREDENTIAL_ACTIVE_RUNS", 3),
     maxAwaitingSessions: envInt("MAX_AWAITING_SESSIONS", 32),

@@ -66,8 +66,8 @@ export async function startTestApp(
     fetchSandQuota: options.fetchSandQuota ?? (async () => UNAVAILABLE_GROK_BOT),
     sandHealth: options.sandHealth ?? {
       ready: true,
-      sdk_version: "1.0.30",
-      patch_contract_version: "1.0.30",
+      sdk_version: "1.0.31",
+      patch_contract_version: "1.0.31",
     },
     assertSandAccess: options.assertSandAccess,
   });

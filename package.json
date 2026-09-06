@@ -42,7 +42,7 @@
     "secret:scan": "bash tests/secret-scan.sh"
   },
   "dependencies": {
-    "@cursor/sdk": "1.0.30",
+    "@cursor/sdk": "1.0.31",
     "proxy-agent": "8.0.2",
     "undici": "8.10.0"
   },
