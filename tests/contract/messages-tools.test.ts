@@ -190,6 +190,70 @@ async function firstToolTurn(ctx: TestContext): Promise<{ names: string[]; elaps
   };
 }
 
+function logFields(ctx: TestContext, message: string): Record<string, unknown> | undefined {
+  return ctx.logs
+    .map((line) => JSON.parse(line) as { fields: Record<string, unknown>; message: string })
+    .find((entry) => entry.message === message)?.fields;
+}
+
+test("round logs carry numeric timings for the batch, the close wait, and the client gap", async () => {
+  ctx = await startTestApp({
+    captureLogs: true,
+    config: { toolBatchSettleMs: 100 },
+    sdk: {
+      scripts: [
+        [
+          { type: "text", chunks: ["checking"] },
+          {
+            type: "tools",
+            calls: [
+              { name: "lookup", input: { q: "a" } },
+              { name: "beta", input: { n: 2 }, delayMs: 40 },
+            ],
+          },
+          { type: "text", chunks: ["both"] },
+        ],
+      ],
+    },
+  });
+  const first = await api(ctx, "/v1/messages", {
+    method: "POST",
+    body: JSON.stringify({ model: "composer-2.5", max_tokens: 32, messages: [{ role: "user", content: "do both" }], tools }),
+  });
+  const turn = (await first.json()) as { content: Array<{ type: string; id?: string }> };
+  const ids = turn.content.filter((block) => block.type === "tool_use").map((block) => block.id ?? "");
+  expect(ids).toHaveLength(2);
+  const awaiting = logFields(ctx, "awaiting tool results");
+  expect(awaiting).toMatchObject({ pending_count: 2, tool_count: 2 });
+  expect(awaiting?.tool_spread_ms).toBeGreaterThanOrEqual(30);
+  expect(awaiting?.batch_close_wait_ms).toBeGreaterThanOrEqual(90);
+  for (const field of ["agent_ready_ms", "first_sdk_event_ms", "first_client_write_ms", "duration_ms"]) {
+    expect(typeof awaiting?.[field]).toBe("number");
+  }
+  const started = Date.now();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  const res = await api(ctx, "/v1/messages", {
+    method: "POST",
+    body: JSON.stringify({
+      model: "composer-2.5",
+      max_tokens: 32,
+      messages: [{ role: "user", content: ids.map((id) => ({ type: "tool_result", tool_use_id: id, content: "ok" })) }],
+      tools,
+    }),
+  });
+  expect(res.status).toBe(200);
+  const received = logFields(ctx, "tool results received");
+  expect(received?.result_count).toBe(2);
+  expect(received?.tool_result_gap_ms).toBeGreaterThanOrEqual(25);
+  expect(received?.tool_result_gap_ms).toBeLessThan(Date.now() - started + 200);
+  const completed = logFields(ctx, "turn completed");
+  expect(typeof completed?.duration_ms).toBe("number");
+  // Segment stamps restart with the continuation; only run liveness is cumulative.
+  expect(typeof completed?.first_sdk_event_ms).toBe("number");
+  expect(completed?.first_sdk_event_ms).toBeLessThanOrEqual(completed?.duration_ms as number);
+  expect(completed?.tool_count).toBeUndefined();
+});
+
 test("the settle timer restarts on each callback so a staggered batch stays whole", async () => {
   ctx = await startTestApp({
     config: { toolBatchSettleMs: 100 },

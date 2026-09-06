@@ -26,6 +26,8 @@ export interface DriveSdkRunInput {
   };
   completedResults?: Map<string, SdkCustomToolResult[]>;
   afterAgentReady?: (agent: SdkAgent) => void;
+  /** Clock time the request was admitted; anchors the segment timing fields. */
+  startedAt?: number;
 }
 
 export interface SdkRunDriverDeps {
@@ -68,12 +70,14 @@ export class SdkRunDriver {
       onDelta,
     });
     session.run = run;
+    const agentReadyAt = this.deps.clock.now();
     const pump = new EventPump(
       session,
       run,
       this.deps.clock,
       this.deps.toolBatchSettleMs,
       this.deps.firstEventTimeoutMs,
+      { startedAt: input.startedAt ?? agentReadyAt, agentReadyAt },
     );
     session.pump = pump;
     pump.ingestEarly(session.earlyEvents.splice(0));

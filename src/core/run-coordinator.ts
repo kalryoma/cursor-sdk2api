@@ -570,6 +570,7 @@ export class RunCoordinator {
     ordinaryTurn?: CursorAgentTurn,
     sendOverride?: { text: string; images: Array<{ data: string; mimeType: string }> },
   ): Promise<void> {
+    const startedAt = this.deps.clock.now();
     const logicalKey = ordinaryTurn
       ? ordinaryReplayKey(ordinaryTurn)
       : this.logicalKeyFor(auth, parsed);
@@ -597,6 +598,7 @@ export class RunCoordinator {
           tools: parsed.tools,
           agent: { type: "create", apiKey: auth.cursorApiKey, workspaceDir: this.workspaceFor(profile) },
           send: prompt,
+          startedAt,
         },
         logicalKey,
       );
@@ -620,6 +622,7 @@ export class RunCoordinator {
     writerFactory: TurnWriterFactory,
     options: FollowUpOptions = {},
   ): Promise<void> {
+    const startedAt = this.deps.clock.now();
     this.assertIdentity(req, session, auth, parsed);
     const logicalKey = this.logicalKeyFor(auth, parsed);
     if (await this.tryReconnectLogicalRun(req, res, parsed, requestId, writerFactory, logicalKey)) {
@@ -656,6 +659,7 @@ export class RunCoordinator {
           agent: agentSource,
           send: prompt,
           afterAgentReady: options.afterAgentReady,
+          startedAt,
         },
         logicalKey,
       );
@@ -784,6 +788,16 @@ export class RunCoordinator {
     if (unknown.length > 0) throw invalidRequest(`unknown tool_use_id: ${unknown.join(",")}`);
     if (missing.length > 0) throw invalidRequest(`missing tool_result for: ${missing.join(",")}`);
 
+    const publishedAt = session.pump.timing.publishedAt;
+    this.deps.logger.info(
+      {
+        session_id: session.sessionId,
+        result_count: results.length,
+        // Time the client spent executing the batch and posting results: the part of a round the gateway does not own.
+        ...(publishedAt !== undefined ? { tool_result_gap_ms: this.deps.clock.now() - publishedAt } : {}),
+      },
+      "tool results received",
+    );
     this.beginOrdinaryReplaySegment(session, auth, parsed);
     session.pump.beginNextSegment();
     session.lastResultDigest = digest;
@@ -1056,6 +1070,7 @@ export class RunCoordinator {
               session_id: session.sessionId,
               pending_count: session.unresolvedIds().length,
               stop_reason: "tool_use",
+              ...session.pump?.timingSummary(),
             },
             "awaiting tool results",
           );
@@ -1068,6 +1083,7 @@ export class RunCoordinator {
               session_id: session.sessionId,
               stop_reason: "end_turn",
               usage_status: boundary.turn.usage.usage_status,
+              ...session.pump?.timingSummary(),
             },
             "turn completed",
           );
