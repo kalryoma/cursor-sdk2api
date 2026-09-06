@@ -1,5 +1,6 @@
 import type { ServerResponse } from "node:http";
 import { afterEach, expect, test } from "vitest";
+import { FakeClock } from "../../src/clock.js";
 import { parseModelParams } from "../../src/protocols/anthropic/parse.js";
 import { createAnthropicWriter } from "../../src/protocols/anthropic/writer.js";
 import { api, closeTestApp, parseSse, startTestApp, type TestContext } from "../helpers/app.js";
@@ -422,6 +423,8 @@ test("Anthropic fail is a no-op after it has already ended the response", () => 
     stream: true,
     messageId: "msg_test",
     session: { sessionId: "ses_test", modelId: "composer-2.5", createdAt: 0 },
+    clock: new FakeClock(),
+    heartbeatMs: 0,
   });
   writer.onText?.("partial");
   writer.fail(new Error("upstream failed"));

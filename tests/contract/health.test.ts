@@ -43,7 +43,7 @@ test("health reports runtime capability truth without account data", async () =>
   expect(body.status).toBe("ok");
   expect(body.service).toBe("cursor-sdk2api");
   expect(body.version).toBe(ctx.app.config.version);
-  expect(body.sdk_version).toBe("1.0.30");
+  expect(body.sdk_version).toBe("1.0.31");
   expect(body.runtime).toBe("local");
   expect(body.network).toEqual({
     proxy_configured: ctx.app.config.proxyConfigured,
@@ -84,8 +84,8 @@ test("health reports runtime capability truth without account data", async () =>
   const profiles = (body as { profiles?: { default?: string; sdk?: { ready?: boolean }; sand?: { ready?: boolean; sdk_version?: string; patch_contract_version?: string } } }).profiles;
   expect(profiles?.default).toBe("sdk");
   expect(profiles?.sdk?.ready).toBe(true);
-  expect(profiles?.sand?.sdk_version).toBe("1.0.30");
-  expect(profiles?.sand?.patch_contract_version).toBe("1.0.30");
+  expect(profiles?.sand?.sdk_version).toBe("1.0.31");
+  expect(profiles?.sand?.patch_contract_version).toBe("1.0.31");
   expect(typeof profiles?.sand?.ready).toBe("boolean");
 });
 

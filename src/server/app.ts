@@ -20,6 +20,7 @@ import type { GatewayConfig } from "../config.js";
 import { CompactAnchorStore } from "../core/compact-anchor.js";
 import { RunCoordinator } from "../core/run-coordinator.js";
 import type { PumpBoundary } from "../core/event-pump.js";
+import { SystemPromptGate } from "../core/system-prompt-gate.js";
 import { LineageStore } from "../core/lineage-store.js";
 import { OrdinaryTurnJournal } from "../core/ordinary-turn-journal.js";
 import { RuntimeLedger } from "../core/runtime-ledger.js";
@@ -311,6 +312,20 @@ export function createApp(input: {
       return;
     } catch (initialError) {
       let error = initialError;
+      if (!responseStarted(res) && SystemPromptGate.matches(error)) {
+        // The account is not enabled for the SDK systemPrompt; remember that and send the prompt inline.
+        coordinator.systemPromptGate.markGated(first.fingerprint);
+        logger.warn(
+          { model: parsed.model, fallback_reason: "system_prompt_gated" },
+          "retrying pre-semantic Cursor request with the inline system prompt",
+        );
+        try {
+          await run(first);
+          return;
+        } catch (retryError) {
+          error = retryError;
+        }
+      }
       if (!responseStarted(res) && staleCredentialSessionError(error)) {
         const probe = await probeCredential(first);
         if (probe === "valid") {

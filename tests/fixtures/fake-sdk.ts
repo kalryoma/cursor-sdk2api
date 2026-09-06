@@ -22,7 +22,17 @@ export type FakeStep =
   | { type: "text"; chunks: string[]; pauseBetweenMs?: number; early?: boolean }
   | { type: "thinking"; chunks: string[]; early?: boolean }
   | { type: "send-tools"; calls: Array<{ name: string; input: Record<string, unknown>; id?: string }> }
-  | { type: "tools"; calls: Array<{ name: string; input: Record<string, unknown>; id?: string; delayMs?: number }> }
+  | {
+      type: "tools";
+      /** `delayMs` staggers a call's dispatch, as the live SDK does between calls of one generation. */
+      calls: Array<{ name: string; input: Record<string, unknown>; id?: string; delayMs?: number }>;
+      /** Text the model emits after requesting the tools, while their results are still pending. */
+      trailingText?: string[];
+      /** Delay before the trailing text; longer than the settle timer puts it after the batch closed. */
+      trailingTextDelayMs?: number;
+      /** Offsets (ms from step start) at which a token-delta shows the model still generating. */
+      activity?: number[];
+    }
   | { type: "silent-final"; text: string }
   | { type: "empty" }
   | { type: "error"; message: string }
@@ -46,6 +56,22 @@ export interface FakeSdkOptions {
   resumeError?: { message: string; name?: string };
   /** Invoke these custom tools synchronously inside resumeAgent(), before the Agent is returned. */
   resumeEarlyToolCalls?: Array<{ name: string; input: Record<string, unknown>; id?: string }>;
+  /**
+   * Mirror an account without SDK systemPrompt access: create/resume succeed and
+   * the first run of an agent created with systemPrompt fails naming the flag.
+   * Live SDK 1.0.31 reports it through the run stream ("run", default); "send"
+   * rejects the send() promise instead.
+   */
+  systemPromptGated?: boolean | "run" | "send";
+}
+
+const SYSTEM_PROMPT_GATE_MESSAGE = "[invalid_argument] unknown option '--system-prompt'";
+
+type FakeToolStep = Extract<FakeStep, { type: "tools" }>;
+
+/** Steps the fake fires inside send(), before the run is returned. */
+function firesDuringSend(step: FakeStep): boolean {
+  return step.type === "send-tools" || ((step.type === "text" || step.type === "thinking") && step.early === true);
 }
 
 function configuredError(input: { message: string; name?: string }): Error {
@@ -138,6 +164,47 @@ export class FakeRun implements SdkRun {
     await this.onDelta?.(update);
   }
 
+  /**
+   * Mirrors the live SDK: calls of one generation are dispatched one after
+   * another (optionally staggered by `delayMs`) and the run only proceeds once
+   * every execute() promise has resolved. No delta marks the end of the batch.
+   */
+  private async runToolStep(step: FakeToolStep): Promise<void> {
+    const calls = step.calls.map((call) => ({ ...call, id: call.id ?? `sdk_${randomUUID()}` }));
+    const activity = (step.activity ?? []).map((at) =>
+      setTimeout(() => {
+        void this.emitDelta({ type: "token-delta", tokens: 1 });
+      }, at),
+    );
+    const results = calls.map((call) =>
+      (async () => {
+        if (call.delayMs) await new Promise((resolve) => setTimeout(resolve, call.delayMs));
+        const tool = this.tools[call.name];
+        if (!tool) throw new Error(`fake sdk missing tool ${call.name}`);
+        return Promise.resolve(tool.execute(call.input, { toolCallId: call.id }));
+      })().then((result) => {
+        this.capturedToolResults.push(result);
+        return result;
+      }),
+    );
+    // Rejections are observed by Promise.all(results) below; keep them handled meanwhile.
+    for (const result of results) void result.catch(() => undefined);
+    if (step.trailingText?.length && step.trailingTextDelayMs) {
+      await new Promise((resolve) => setTimeout(resolve, step.trailingTextDelayMs));
+    }
+    for (const chunk of step.trailingText ?? []) {
+      await this.emitDelta({ type: "text-delta", text: chunk });
+      const snapshot = { type: "assistant" as const, text: chunk };
+      this.streamSnapshots.push(snapshot);
+      this.events.push(snapshot);
+    }
+    try {
+      await Promise.all(results);
+    } finally {
+      for (const timer of activity) clearTimeout(timer);
+    }
+  }
+
   stream(): AsyncIterable<SdkStreamEvent> {
     this.streamStarts += 1;
     if (this.streamStarts > 1) {
@@ -189,18 +256,7 @@ export class FakeRun implements SdkRun {
             this.events.push(snapshot);
           }
         } else if (step.type === "tools") {
-          const promises = step.calls.map(async (call) => {
-            if (call.delayMs) await new Promise((resolve) => setTimeout(resolve, call.delayMs));
-            const tool = this.tools[call.name];
-            if (!tool) throw new Error(`fake sdk missing tool ${call.name}`);
-            return Promise.resolve(
-              tool.execute(call.input, { toolCallId: call.id ?? `sdk_${randomUUID()}` }),
-            ).then((result) => {
-              this.capturedToolResults.push(result);
-              return result;
-            });
-          });
-          await Promise.all(promises);
+          await this.runToolStep(step);
         } else if (step.type === "silent-final") {
           finalText = step.text;
         } else if (step.type === "empty") {
@@ -251,13 +307,21 @@ export class FakeAgent implements SdkAgent {
     private readonly finalUsage: SdkUsage | undefined,
     private readonly liveUsage: SdkUsage | undefined,
     agentId?: string,
+    private readonly systemPromptGated: boolean | "run" | "send" = false,
   ) {
     this.agentId = agentId ?? `agent-${randomUUID()}`;
   }
 
   async send(sendInput: SdkSendInput): Promise<SdkRun> {
     this.lastSend = sendInput;
-    const script = this.scripts[Math.min(this.sendCount, this.scripts.length - 1)] ?? [{ type: "text", chunks: ["ok"] }];
+    const gated = this.systemPromptGated && this.input.systemPrompt && this.sendCount === 0;
+    if (gated && this.systemPromptGated === "send") {
+      this.sendCount += 1;
+      throw Object.assign(new Error(SYSTEM_PROMPT_GATE_MESSAGE), { code: "invalid_argument" });
+    }
+    const script = gated
+      ? [{ type: "error" as const, message: SYSTEM_PROMPT_GATE_MESSAGE }]
+      : this.scripts[Math.min(this.sendCount, this.scripts.length - 1)] ?? [{ type: "text", chunks: ["ok"] }];
     this.sendCount += 1;
     const sendError = script.find((step) => step.type === "send-error");
     if (sendError?.type === "send-error") {
@@ -265,34 +329,32 @@ export class FakeAgent implements SdkAgent {
       if (sendError.name) error.name = sendError.name;
       throw error;
     }
-    let earlyCount = 0;
-    const first = script[0];
-    if (first && (first.type === "text" || first.type === "thinking") && first.early) {
-      earlyCount = first.chunks.length;
+    // The leading run of early steps fires here, in script order, so a test can
+    // interleave early deltas and synchronous tool dispatch the way the live
+    // SDK can before send() resolves.
+    const leading: FakeStep[] = [];
+    for (const step of script) {
+      if (!firesDuringSend(step)) break;
+      leading.push(step);
     }
-    const run = new FakeRun(
-      script,
-      sendInput.customTools ?? this.input.customTools,
-      this.finalUsage,
-      this.liveUsage,
-      sendInput.onDelta ?? sendInput.onEvent,
-      earlyCount,
-    );
+    const earlyCount = leading.reduce((count, step) => count + ("chunks" in step ? step.chunks.length : 0), 0);
+    const customTools = sendInput.customTools ?? this.input.customTools;
+    const run = new FakeRun(script, customTools, this.finalUsage, this.liveUsage, sendInput.onDelta ?? sendInput.onEvent, earlyCount);
     this.runs.push(run);
-    if (first?.type === "send-tools") {
-      for (const call of first.calls) {
-        const tool = (sendInput.customTools ?? this.input.customTools)[call.name];
-        if (!tool) throw new Error(`fake sdk missing tool ${call.name}`);
-        void Promise.resolve(
-          tool.execute(call.input, { toolCallId: call.id ?? `sdk_${randomUUID()}` }),
-        ).then((result) => {
-          run.capturedToolResults.push(result);
-        });
+    for (const step of leading) {
+      if (step.type === "send-tools") {
+        for (const call of step.calls) {
+          const tool = customTools[call.name];
+          if (!tool) throw new Error(`fake sdk missing tool ${call.name}`);
+          void Promise.resolve(tool.execute(call.input, { toolCallId: call.id ?? `sdk_${randomUUID()}` })).then((result) => {
+            run.capturedToolResults.push(result);
+          });
+        }
+        continue;
       }
-    }
-    if (earlyCount > 0 && first && (first.type === "text" || first.type === "thinking")) {
-      const kind = first.type === "thinking" ? "thinking-delta" : "text-delta";
-      for (const chunk of first.chunks) {
+      if (step.type !== "text" && step.type !== "thinking") continue;
+      const kind = step.type === "thinking" ? "thinking-delta" : "text-delta";
+      for (const chunk of step.chunks) {
         await run.emitEarlyForTest({ type: kind, text: chunk });
       }
     }
@@ -324,7 +386,7 @@ export class FakeSdk implements SdkRuntime {
   readonly credentialProbeCalls: string[] = [];
 
   constructor(private readonly options: FakeSdkOptions = {}) {
-    this.sdkVersion = options.sdkVersion ?? "1.0.30";
+    this.sdkVersion = options.sdkVersion ?? "1.0.31";
     this.models = options.models ?? {
       ok: true,
       models: [{ id: "composer-2.5", displayName: "Composer 2.5" }],
@@ -363,6 +425,8 @@ export class FakeSdk implements SdkRuntime {
       this.takeScripts([[{ type: "text", chunks: ["hello"] }]]),
       this.options.finalUsage,
       this.options.liveUsage,
+      undefined,
+      this.options.systemPromptGated ?? false,
     );
     this.agents.push(agent);
     return agent;
@@ -386,6 +450,7 @@ export class FakeSdk implements SdkRuntime {
       this.options.finalUsage,
       this.options.liveUsage,
       input.agentId,
+      this.options.systemPromptGated ?? false,
     );
     this.agents.push(agent);
     return agent;

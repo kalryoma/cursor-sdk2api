@@ -37,11 +37,12 @@
     "lint": "npm run typecheck",
     "live:smoke": "tsx tests/live-smoke/run.ts",
     "live:ordinary": "tsx tests/live-smoke/ordinary-turn-live.ts",
+    "live:timing": "tsx tests/live-smoke/timing.ts",
     "new-api:smoke": "node integrations/new-api/smoke.mjs",
     "secret:scan": "bash tests/secret-scan.sh"
   },
   "dependencies": {
-    "@cursor/sdk": "1.0.30",
+    "@cursor/sdk": "1.0.31",
     "proxy-agent": "8.0.2",
     "undici": "8.10.0"
   },

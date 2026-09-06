@@ -89,7 +89,7 @@ test("rewriteSandSdkSource fails closed on replacement count mismatch", () => {
 test("assertSandContract fails closed when a contracted file is missing", () => {
   const root = tempDir("cursor-sand-missing-");
   writeTree(root, {
-    "package.json": JSON.stringify({ name: "@cursor/sdk", version: "1.0.30" }),
+    "package.json": JSON.stringify({ name: "@cursor/sdk", version: "1.0.31" }),
     "dist/esm/index.js": `${INDEX_FROM_OBJECT}${INDEX_FROM_SET}`,
   });
   const error = expectMismatch(() => assertSandContract(root), "missing_file");
@@ -99,7 +99,7 @@ test("assertSandContract fails closed when a contracted file is missing", () => 
 test("assertSandContract fails closed on original hash mismatch", () => {
   const root = tempDir("cursor-sand-hash-");
   writeTree(root, {
-    "package.json": JSON.stringify({ name: "@cursor/sdk", version: "1.0.30" }),
+    "package.json": JSON.stringify({ name: "@cursor/sdk", version: "1.0.31" }),
     "dist/esm/index.js": `changed ${INDEX_FROM_OBJECT} ${INDEX_FROM_SET}`,
     "dist/esm/357.js": INDEX_FROM_OBJECT,
   });
@@ -149,7 +149,7 @@ test("createSandSdkClone refuses to write back into the source SDK tree", async 
 });
 
 test(
-  "createSandSdkClone patches installed @cursor/sdk 1.0.30 without mutating the source tree",
+  "createSandSdkClone patches installed @cursor/sdk 1.0.31 without mutating the source tree",
   async () => {
     const sourceDir = resolveInstalledCursorSdkDir();
     const indexPath = join(sourceDir, "dist/esm/index.js");

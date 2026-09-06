@@ -72,6 +72,11 @@ export function writeSse(res: ServerResponse, event: string, data: unknown): voi
   res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
+/** SSE comment line; parsers skip it, proxies and clients see traffic. */
+export function writeSseComment(res: ServerResponse, text: string): void {
+  res.write(`: ${text}\n\n`);
+}
+
 /** OpenAI-style SSE: `data: ...\\n\\n` only, no Anthropic `event:` names. */
 export function writeDataFrame(res: ServerResponse, data: unknown | "[DONE]"): void {
   if (data === "[DONE]") {

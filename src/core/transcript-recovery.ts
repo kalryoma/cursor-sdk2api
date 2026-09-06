@@ -19,6 +19,7 @@ export interface TranscriptRecovery {
 export function buildTranscriptRecovery(
   parsed: ParsedMessages,
   currentResults: ParsedToolResult[],
+  options: { omitSystem?: boolean } = {},
 ): TranscriptRecovery {
   if (parsed.tools.length === 0) {
     throw sessionLost("Expired tool continuation cannot recover without its tool catalog");
@@ -90,7 +91,7 @@ export function buildTranscriptRecovery(
     }
   }
 
-  const rendered = renderPrompt(parsed, { includeContinuation: true });
+  const rendered = renderPrompt(parsed, { includeContinuation: true, omitSystem: options.omitSystem });
   const lines = currentResults.map((result) => {
     const call = calls.get(result.toolUseId) as TranscriptCall;
     return `TOOL_RESULT tool_use_id=${result.toolUseId} tool=${call.name} is_error=${result.isError} content=${JSON.stringify(result.content)}`;

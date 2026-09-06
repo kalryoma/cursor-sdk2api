@@ -1,6 +1,6 @@
-import type { TurnWriter, TurnWriterContext } from "../../core/turn-writer.js";
+import { startHeartbeat, unwrittenTail, type TurnWriter, type TurnWriterContext } from "../../core/turn-writer.js";
 import { toPublicErrorBody } from "../../errors.js";
-import { sendError, sendJson } from "../../server/http-util.js";
+import { sendError, sendJson, writeSse } from "../../server/http-util.js";
 import { encodeMessage } from "./encode.js";
 import {
   beginSse,
@@ -14,7 +14,7 @@ import {
   writeThinkingDelta,
   writeToolUse,
 } from "./sse.js";
-import type { AssistantTurn } from "./types.js";
+import type { AssistantTurn, ToolUseBlock } from "./types.js";
 
 export function createAnthropicWriter(ctx: TurnWriterContext): TurnWriter {
   return new AnthropicTurnWriter(ctx);
@@ -25,25 +25,33 @@ class AnthropicTurnWriter implements TurnWriter {
   private failed = false;
   private nextIndex = 0;
   private open?: { kind: "thinking" | "text"; index: number };
-  private emitted = new Set<"thinking" | "text">();
+  private writtenText = 0;
+  private writtenThinking = 0;
+  private readonly emittedTools = new Set<string>();
+  private stopHeartbeat: () => void = () => undefined;
 
   constructor(private readonly ctx: TurnWriterContext) {}
+
+  onToolUse(block: ToolUseBlock): void {
+    if (!this.ctx.stream || this.dead()) return;
+    this.ensureStart();
+    this.writeTool(block);
+  }
 
   onThinking(text: string): void {
     if (!this.ctx.stream || this.dead()) return;
     this.ensureStart();
-    this.openBlock("thinking");
-    if (text && this.open) writeThinkingDelta(this.ctx.res, this.open.index, text, true);
+    this.appendDelta("thinking", text);
   }
 
   onText(text: string): void {
     if (!this.ctx.stream || this.dead()) return;
     this.ensureStart();
-    this.openBlock("text");
-    if (text && this.open) writeTextDelta(this.ctx.res, this.open.index, text, true);
+    this.appendDelta("text", text);
   }
 
   finish(turn: AssistantTurn, extra?: { replayed?: boolean }): void {
+    this.stopHeartbeat();
     if (!this.ctx.stream) {
       if (!this.dead()) {
         sendJson(
@@ -62,27 +70,23 @@ class AnthropicTurnWriter implements TurnWriter {
       return;
     }
     this.ensureStart();
-    this.closeOpen();
-    for (const block of turn.blocks) {
-      if (block.type === "thinking" && !this.emitted.has("thinking")) {
-        const index = this.nextIndex++;
-        writeThinkingDelta(this.ctx.res, index, block.thinking, false);
-        writeBlockStop(this.ctx.res, index);
-        this.emitted.add("thinking");
-      } else if (block.type === "text" && !this.emitted.has("text")) {
-        const index = this.nextIndex++;
-        writeTextDelta(this.ctx.res, index, block.text, false);
-        writeBlockStop(this.ctx.res, index);
-        this.emitted.add("text");
-      } else if (block.type === "tool_use") {
-        writeToolUse(this.ctx.res, this.nextIndex++, block);
-      }
+    this.stopHeartbeat();
+    const tail = unwrittenTail(turn.blocks, {
+      textChars: this.writtenText,
+      thinkingChars: this.writtenThinking,
+      toolIds: this.emittedTools,
+    });
+    for (const segment of tail) {
+      if (segment.kind === "tool_use") this.writeTool(segment.block);
+      else this.appendDelta(segment.kind, segment.text);
     }
+    this.closeOpen();
     writeMessageStop(this.ctx.res, turn);
     this.ctx.res.end();
   }
 
   fail(error: unknown): void {
+    this.stopHeartbeat();
     if (this.failed || this.dead()) return;
     this.failed = true;
     if (this.ctx.stream && this.ctx.res.headersSent) {
@@ -95,14 +99,29 @@ class AnthropicTurnWriter implements TurnWriter {
     sendError(this.ctx.res, error, this.ctx.requestId);
   }
 
-  private openBlock(kind: "thinking" | "text"): void {
-    if (this.open?.kind === kind) return;
+  private writeTool(block: ToolUseBlock): void {
     this.closeOpen();
-    const index = this.nextIndex++;
-    if (kind === "thinking") writeThinkingDelta(this.ctx.res, index, "", false);
-    else writeTextDelta(this.ctx.res, index, "", false);
-    this.open = { kind, index };
-    this.emitted.add(kind);
+    writeToolUse(this.ctx.res, this.nextIndex++, block);
+    this.emittedTools.add(block.id);
+  }
+
+  /** Blocks are contiguous runs: a kind change closes the open block. */
+  private appendDelta(kind: "thinking" | "text", text: string): void {
+    if (this.open?.kind !== kind) {
+      this.closeOpen();
+      const index = this.nextIndex++;
+      if (kind === "thinking") writeThinkingDelta(this.ctx.res, index, "", false);
+      else writeTextDelta(this.ctx.res, index, "", false);
+      this.open = { kind, index };
+    }
+    if (!text || !this.open) return;
+    if (kind === "thinking") {
+      writeThinkingDelta(this.ctx.res, this.open.index, text, true);
+      this.writtenThinking += text.length;
+    } else {
+      writeTextDelta(this.ctx.res, this.open.index, text, true);
+      this.writtenText += text.length;
+    }
   }
 
   private closeOpen(): void {
@@ -123,6 +142,8 @@ class AnthropicTurnWriter implements TurnWriter {
       model: this.ctx.session.modelId,
       sessionId: this.ctx.session.sessionId,
     });
+    // Same shape the Anthropic API sends between events; clients already ignore it.
+    this.stopHeartbeat = startHeartbeat(this.ctx, () => writeSse(this.ctx.res, "ping", { type: "ping" }));
   }
 
   private dead(): boolean {

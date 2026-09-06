@@ -12,7 +12,13 @@ export CURSOR_LIVE_SMOKE=1
 export CURSOR_API_KEY=...   # do not commit; do not paste into chat
 npm run live:smoke
 npm run live:ordinary   # exact-lineage ordinary follow-up only
+npm run live:timing     # where a tool round spends its time
 ```
+
+`live:timing` records first SSE byte, first/last tool item, stop, and gateway
+round timings. It forwards `TOOL_BATCH_SETTLE_MS`, `TOOL_BATCH_IDLE_MS`,
+`HOST_SYSTEM_PROMPT_MODE`, and `SSE_HEARTBEAT_MS`. `LIVE_TIMING_PROTOCOL_MODEL`
+picks the Chat/Responses model (default: the first requested model).
 
 Optional:
 

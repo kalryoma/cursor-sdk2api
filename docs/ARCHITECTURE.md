@@ -24,11 +24,19 @@ HTTP /v1/messages | /v1/chat/completions | /v1/responses
 
 Responses continuation is not `previous_response_id` reconstruction. The parser accepts a full Responses transcript and treats only the latest trailing `function_call_output` batch as the continuation. Completed follow-up still uses `x-cursor-session-id` exactly as Messages/Chat. `previous_response_id`, `store=true`, background, conversation, and hosted built-in tools fail closed. The known optional `reasoning.encrypted_content` include is accepted but omitted; unknown expansions fail closed.
 
-Text/thinking streaming uses official `SendOptions.onDelta` (`text-delta` / `thinking-delta`). Early deltas that arrive before `send()` resolves are buffered, then ingested into the pump. When onDelta is active, `run.stream()` assistant/thinking snapshots are not forwarded again.
+Text/thinking streaming uses official `SendOptions.onDelta` (`text-delta` / `thinking-delta`); `token-delta` is a liveness count only. Deltas and tool callbacks that fire before the pump exists share one ordered queue on the Session and are drained in arrival order. When onDelta is active, `run.stream()` assistant/thinking snapshots are not forwarded again.
 
-`customTool.execute` is the authority for client-visible `tool_use`. SDK `tool_call` stream events are diagnostic and are de-duplicated by call id.
+One ordered journal per HTTP response segment is the source for SSE, the non-stream body, in-process replay, and `response.completed.output`. Consecutive text or thinking deltas fold into one block; tool calls stay where the SDK requested them. `finish()` writes only the unstreamed tail. The Responses writer and encoder share one item-id rule.
 
-`SdkRunDriver` maps one custom-tool table before Agent create/resume and carries that same table through `send()` and EventPump attachment. Tool callbacks that fire synchronously during Agent resume or send are queued on the Session and drained only after the pump is attached; the coordinator never remaps tools or calls `Agent.resume` directly.
+`customTool.execute` is the authority for client-visible tools. Writers emit the `tool_use` / `tool_calls` / `function_call` item when `execute` fires; only the stop reason waits for the batch to close. SDK `tool_call` stream events are diagnostic.
+
+A tool batch closes `TOOL_BATCH_SETTLE_MS` after the latest `execute`, or earlier on SDK delta silence when `TOOL_BATCH_IDLE_MS` is set (settle stays the cap). No SDK delta marks the end of a model generation before local tools run ([probe](evidence/2026-09-04-tool-batch-close-live-probe.md)). SDK output that arrives after the batch was published is carried, in order, into the next segment: a tool call opens it as its own batch, text or thinking heads its journal. Continuation and lineage use only the published batch. Logs: `batch_close` (`settle_timer` / `idle` / `carried`), `batch_close_wait_ms`, `tool_spread_ms`, `tool_result_gap_ms`; segment timings restart on every continuation.
+
+`SSE_HEARTBEAT_MS` sends Anthropic `ping` events or SSE comment lines after the first protocol event. It never fires before headers, so pre-semantic failover is unaffected.
+
+`HOST_SYSTEM_PROMPT_MODE=inline` (default) sends the client system prompt inside the first user turn. `replace` passes it as the SDK `systemPrompt` on create and resume, restating harness tool context when tools exist and dropping the inline `System:` block; the SDK does not persist it, so the session and its lineage record bind the prompt's mode and digest. A follow-up on a live handle with a different prompt resumes the same agent with the new prompt. A restart resume mid-turn needs the same prompt and re-applies it the way the stored session did, whatever the current mode; a new turn needs some prompt. Otherwise `409 cursor_session_conflict` (a complete transcript still cold-recovers). An account without access fails the first `send` naming `--system-prompt`; the gateway retries that request inline and remembers the credential.
+
+`SdkRunDriver` maps one custom-tool table before Agent create/resume and carries that same table through `send()` and EventPump attachment. Deltas and tool callbacks that fire synchronously during Agent resume or send are queued on the Session and drained, in order, once the pump is attached; the coordinator never remaps tools or calls `Agent.resume` directly.
 
 ## Network transport
 

@@ -26,9 +26,9 @@ BF Labs UI, Copyright (c) 2026 BF Labs, used under the MIT License. The copied s
 maintained in this repository so the standalone gateway does not require a private package
 registry at runtime or build time.
 
-## Known production audit findings (2026-08-28)
+## Known production audit findings (re-checked 2026-09-06)
 
-`npm audit --omit=dev` on `@cursor/sdk@1.0.30`:
+`npm audit --omit=dev` on `@cursor/sdk@1.0.31` (unchanged from 1.0.30):
 
 | Package | Severity | Notes |
 |---|---|---|

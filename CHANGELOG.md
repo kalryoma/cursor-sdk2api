@@ -13,6 +13,11 @@
 
 ## Unreleased
 
+- Tool items stream when the SDK requests the tool; stream, non-stream body, replay, and `response.completed.output` share one ordered journal, including events that fire before `send()` resolves. Only the stop reason waits for the batch to close. Live `main` vs this branch: `docs/evidence/2026-09-06-pr-performance-diff.md`.
+- Round logs carry numeric timings per segment (`agent_ready_ms`, `first_sdk_event_ms`, `first_client_write_ms`, `tool_count`, `tool_spread_ms`, `batch_close_wait_ms`, `duration_ms`, `tool_result_gap_ms`). `SSE_HEARTBEAT_MS` (default 15000) keeps a started SSE response alive. `npm run live:timing` measures a tool round.
+- `@cursor/sdk` 1.0.31 with a rehashed `sand` patch contract. Delta schema and core adapter unchanged: `docs/evidence/2026-09-06-cursor-sdk-1.0.31-audit.md`.
+- `HOST_SYSTEM_PROMPT_MODE=replace` (opt-in; default stays `inline`) passes the client system prompt as the SDK `systemPrompt`, bound to the session and its lineage by mode and digest: a changed prompt re-applies through `Agent.resume`, a mid-turn restart resume follows the stored mode even if `HOST_SYSTEM_PROMPT_MODE` changed, and a resume without the stored prompt is `409`. Gated accounts retry inline and are remembered.
+- SDK output that arrives after a batch closed is carried into the next turn in order (a late tool call as its own batch, late text or thinking at the head) instead of failing the session or being dropped. `TOOL_BATCH_IDLE_MS` (default off) can close earlier on SDK delta silence; `batch_close` is `settle_timer`, `idle`, or `carried`.
 - Ordinary turns now follow BeefAPI's Cursor Agent contract: a typed turn IR, exact-lineage Agent reuse, and `send(current turn)` instead of flattening the whole transcript on every request. Tool continuation, `x-cursor-session-id` follow-up, and cold rebuild remain. Disable with `ORDINARY_TURN_COORDINATOR=0`.
 
 - `/v1/messages` accepts sub2api compatibility roles without flattening the transcript: `system`/`developer` remain in order, historical `tool`/`function` output stays visible to the Harness, and a trailing tool result requires a real call id before entering continuation lookup.

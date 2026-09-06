@@ -26,36 +26,18 @@ export interface DriveSdkRunInput {
   };
   completedResults?: Map<string, SdkCustomToolResult[]>;
   afterAgentReady?: (agent: SdkAgent) => void;
+  /** Clock time the request was admitted; anchors the segment timing fields. */
+  startedAt?: number;
+  /** Host system prompt for Agent.create / Agent.resume; ignored for an existing handle. */
+  systemPrompt?: string;
 }
 
 export interface SdkRunDriverDeps {
   sdk: SdkRuntime;
   clock: Clock;
   toolBatchSettleMs: number;
+  toolBatchIdleMs?: number;
   firstEventTimeoutMs: number;
-}
-
-function createDeltaBridge() {
-  const early: SdkDeltaUpdate[] = [];
-  let pump: EventPump | undefined;
-  const ingest = (update: SdkDeltaUpdate) => {
-    early.push(update);
-    flush();
-  };
-  const flush = () => {
-    if (!pump) return;
-    while (early.length > 0) {
-      const next = early.shift();
-      if (next) pump.ingestDelta(next);
-    }
-  };
-  return {
-    ingest,
-    attach(next: EventPump) {
-      pump = next;
-      flush();
-    },
-  };
 }
 
 export class SdkRunDriver {
@@ -73,29 +55,40 @@ export class SdkRunDriver {
       input.completedResults,
     );
     const agent = await this.resolveAgent(input, customTools);
+    if (session.agent && session.agent !== agent) {
+      // A resume re-applied the systemPrompt to the same agentId; the old handle is superseded.
+      void Promise.resolve(session.agent.close()).catch(() => undefined);
+    }
     session.agent = agent;
     session.sdkAgentId = agent.agentId;
     input.afterAgentReady?.(agent);
 
-    const deltas = createDeltaBridge();
+    // Deltas and tool callbacks that fire before the pump exists share one
+    // queue with the tool bridge, so their relative order survives the attach.
+    const onDelta = (update: SdkDeltaUpdate) => {
+      if (session.pump) session.pump.ingestDelta(update);
+      else session.earlyEvents.push({ type: "delta", update });
+    };
     const run = await agent.send({
       text: input.send.text,
       images: input.send.images,
       customTools,
       force: input.send.force,
-      onDelta: deltas.ingest,
+      onDelta,
     });
     session.run = run;
+    const agentReadyAt = this.deps.clock.now();
     const pump = new EventPump(
       session,
       run,
       this.deps.clock,
       this.deps.toolBatchSettleMs,
       this.deps.firstEventTimeoutMs,
+      { startedAt: input.startedAt ?? agentReadyAt, agentReadyAt },
+      this.deps.toolBatchIdleMs ?? 0,
     );
     session.pump = pump;
-    deltas.attach(pump);
-    pump.ingestEarly(session.earlyCalls.splice(0));
+    pump.ingestEarly(session.earlyEvents.splice(0));
     return pump;
   }
 
@@ -110,6 +103,7 @@ export class SdkRunDriver {
       customTools,
       runtimeProfile: input.session.runtimeProfile,
       hostedSearch: input.session.hostedSearch,
+      ...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
     };
     if (input.agent.type === "existing") return Promise.resolve(input.agent.agent);
     if (input.agent.type === "resume") {

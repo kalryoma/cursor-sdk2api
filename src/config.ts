@@ -13,6 +13,13 @@ import { resolveOutboundProxy } from "./sdk/proxy.js";
 
 export type AuthMode = "byok" | "managed";
 
+/**
+ * `inline` (default): the client system prompt travels inside the first user
+ * send. `replace`: it becomes the SDK `systemPrompt` and the inline `System:`
+ * block is dropped; opt-in until verified live on an enabled account.
+ */
+export type HostSystemPromptMode = "replace" | "inline";
+
 const PACKAGE_VERSION = (createRequire(import.meta.url)("../package.json") as { version: string }).version;
 
 export interface GatewayConfig {
@@ -33,6 +40,14 @@ export interface GatewayConfig {
   firstEventTimeoutMs: number;
   ordinaryTurnCoordinator: boolean;
   toolBatchSettleMs: number;
+  /**
+   * Close a tool batch once the SDK delta stream has been silent for this long
+   * after the latest callback; 0 disables and TOOL_BATCH_SETTLE_MS stays the cap.
+   */
+  toolBatchIdleMs: number;
+  /** SSE keep-alive interval once a stream has started; 0 disables. */
+  sseHeartbeatMs: number;
+  hostSystemPromptMode: HostSystemPromptMode;
   catalogCacheMs: number;
   sweepIntervalMs: number;
   maxBodyBytes: number;
@@ -113,6 +128,12 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+function envHostSystemPromptMode(): HostSystemPromptMode {
+  const raw = (process.env.HOST_SYSTEM_PROMPT_MODE ?? "inline").trim().toLowerCase();
+  if (raw === "replace" || raw === "inline") return raw;
+  throw new Error("Environment variable HOST_SYSTEM_PROMPT_MODE must be replace or inline");
+}
+
 export function loadConfig(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
   const authMode = (process.env.AUTH_MODE === "managed" ? "managed" : "byok") as AuthMode;
   const sessionTtlMs = clamp(envInt("SESSION_TTL_MS", 30 * 60_000), 5 * 60_000, 60 * 60_000);
@@ -129,7 +150,7 @@ export function loadConfig(overrides: Partial<GatewayConfig> = {}): GatewayConfi
     gatewayAccessKey: process.env.GATEWAY_ACCESS_KEY || undefined,
     instanceId: instanceId(process.env.INSTANCE_ID),
     version: process.env.GATEWAY_VERSION?.trim() || PACKAGE_VERSION,
-    sdkVersion: "1.0.30",
+    sdkVersion: "1.0.31",
     globalActiveRuns: envInt("GLOBAL_ACTIVE_RUNS", 8),
     perCredentialActiveRuns: envInt("PER_CREDENTIAL_ACTIVE_RUNS", 3),
     maxAwaitingSessions: envInt("MAX_AWAITING_SESSIONS", 32),
@@ -142,6 +163,9 @@ export function loadConfig(overrides: Partial<GatewayConfig> = {}): GatewayConfi
       envBool("CURSOR_AGENT_TURN_COORDINATOR", true),
     ),
     toolBatchSettleMs: envInt("TOOL_BATCH_SETTLE_MS", 1_500),
+    toolBatchIdleMs: envInt("TOOL_BATCH_IDLE_MS", 0),
+    sseHeartbeatMs: envInt("SSE_HEARTBEAT_MS", 15_000),
+    hostSystemPromptMode: envHostSystemPromptMode(),
     catalogCacheMs: envInt("CATALOG_CACHE_MS", 5 * 60_000),
     sweepIntervalMs: envInt("SWEEP_INTERVAL_MS", 5_000),
     // OpenCodex Chat Completions history with image tool output exceeds 2 MiB.

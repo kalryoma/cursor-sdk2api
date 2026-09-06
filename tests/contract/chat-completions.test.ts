@@ -340,6 +340,83 @@ test("stream tool_calls are JSON-string arguments on the boundary chunk", async 
   expect((finish?.choices as Array<{ finish_reason?: string }>)?.[0]?.finish_reason).toBe("tool_calls");
 });
 
+test("stream emits each tool_call as it arrives with increasing index and no boundary duplicate", async () => {
+  ctx = await startTestApp({
+    config: { toolBatchSettleMs: 300 },
+    sdk: {
+      scripts: [
+        [
+          { type: "text", chunks: ["checking"] },
+          {
+            type: "tools",
+            calls: [
+              { name: "lookup", input: { q: "a" } },
+              { name: "beta", input: { n: 2 }, delayMs: 20 },
+            ],
+          },
+          { type: "text", chunks: ["both"] },
+        ],
+      ],
+    },
+  });
+  const res = await api(ctx, "/v1/chat/completions", {
+    method: "POST",
+    body: JSON.stringify({
+      model: "composer-2.5",
+      stream: true,
+      messages: [{ role: "user", content: "do both" }],
+      tools,
+    }),
+  });
+  const frames = parseChatSse(await res.text()).filter(isRecord);
+  const choice = (chunk: Record<string, unknown>) =>
+    (chunk.choices as Array<{ delta?: { content?: string; tool_calls?: Array<{ index: number; function: { name: string } }> }; finish_reason?: string | null }>)?.[0];
+  const toolChunks = frames.filter((chunk) => Array.isArray(choice(chunk)?.delta?.tool_calls));
+  expect(toolChunks).toHaveLength(2);
+  expect(toolChunks.flatMap((chunk) => choice(chunk)?.delta?.tool_calls ?? []).map((call) => [call.index, call.function.name])).toEqual([
+    [0, "lookup"],
+    [1, "beta"],
+  ]);
+  const textIndex = frames.findIndex((chunk) => choice(chunk)?.delta?.content === "checking");
+  const finishIndex = frames.findIndex((chunk) => Boolean(choice(chunk)?.finish_reason));
+  expect(textIndex).toBeGreaterThanOrEqual(0);
+  expect(frames.indexOf(toolChunks[0]!)).toBeGreaterThan(textIndex);
+  expect(finishIndex).toBeGreaterThan(frames.indexOf(toolChunks[1]!));
+  expect(choice(frames[finishIndex]!)?.finish_reason).toBe("tool_calls");
+});
+
+test("text after a tool call streams in arrival order and the non-stream body carries the same content", async () => {
+  ctx = await startTestApp({
+    config: { toolBatchSettleMs: 100 },
+    sdk: {
+      scripts: [
+        [
+          { type: "text", chunks: ["Calling"] },
+          { type: "tools", calls: [{ name: "lookup", input: { q: "a" } }], trailingText: [" now"] },
+          { type: "text", chunks: ["later"] },
+        ],
+      ],
+    },
+  });
+  const body = { model: "composer-2.5", messages: [{ role: "user", content: "go" }], tools };
+  const res = await api(ctx, "/v1/chat/completions", { method: "POST", body: JSON.stringify({ ...body, stream: true }) });
+  const frames = parseChatSse(await res.text()).filter(isRecord);
+  const deltas = frames
+    .map((chunk) => (chunk.choices as Array<{ delta?: { content?: string; tool_calls?: unknown[] } }>)?.[0]?.delta)
+    .filter((delta): delta is { content?: string; tool_calls?: unknown[] } => Boolean(delta))
+    .map((delta) => (Array.isArray(delta.tool_calls) ? "tool_calls" : delta.content))
+    .filter((item) => item !== undefined && item !== "");
+  expect(deltas).toEqual(["Calling", "tool_calls", " now"]);
+  const replay = await api(ctx, "/v1/chat/completions", { method: "POST", body: JSON.stringify(body) });
+  const replayed = (await replay.json()) as {
+    choices: Array<{ finish_reason: string; message: { content: string | null; tool_calls?: Array<{ function: { name: string } }> } }>;
+  };
+  expect(replay.status).toBe(200);
+  expect(replayed.choices[0]?.message.content).toBe("Calling now");
+  expect(replayed.choices[0]?.message.tool_calls?.map((call) => call.function.name)).toEqual(["lookup"]);
+  expect(replayed.choices[0]?.finish_reason).toBe("tool_calls");
+});
+
 test("include_usage emits a choices=[] usage chunk before [DONE]", async () => {
   ctx = await startTestApp({
     sdk: {
