@@ -281,6 +281,7 @@ export function createCursorRuntime(options: { stateDir: string }): SdkRuntime {
       },
       tools: apiProfileToolAllowlist(input.clientToolNames, hostedSearch) as never,
       disallowedTools: ambientDisallowedTools(hostedSearch) as never,
+      ...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
       local,
     };
     let agent;

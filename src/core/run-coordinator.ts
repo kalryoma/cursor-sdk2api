@@ -15,7 +15,7 @@ import {
 } from "../errors.js";
 import type { Logger } from "../log.js";
 import type { ParsedMessages, ParsedToolResult } from "../protocols/anthropic/types.js";
-import { renderPrompt } from "../protocols/anthropic/parse.js";
+import { hostSystemPrompt, renderPrompt } from "../protocols/anthropic/parse.js";
 import { createAnthropicWriter } from "../protocols/anthropic/writer.js";
 import type { SdkRuntime } from "../sdk/port.js";
 import {
@@ -33,6 +33,7 @@ import type { OrdinaryTurnJournal, OrdinaryTurnRecord } from "./ordinary-turn-jo
 import { Session } from "./session.js";
 import { SessionRegistry } from "./session-registry.js";
 import { SdkRunDriver, type DriveSdkRunInput, type SdkAgentSource } from "./sdk-run-driver.js";
+import { SystemPromptGate } from "./system-prompt-gate.js";
 import { batchDigest } from "./tool-bridge.js";
 import { buildTranscriptRecovery } from "./transcript-recovery.js";
 import type { LineageRecord, LineageStore } from "./lineage-store.js";
@@ -63,6 +64,14 @@ interface FollowUpOptions {
   agent?: SdkAgentSource;
   afterAgentReady?: () => void;
   failureReason?: string;
+}
+
+/** Where this request's host system prompt travels, and a digest to bind it to the session. */
+interface PromptPlan {
+  systemPrompt?: string;
+  omitSystem: boolean;
+  mode: "replace" | "inline";
+  digest: string;
 }
 
 export interface CoordinatorDeps {
@@ -116,8 +125,10 @@ export class RunCoordinator {
   private readonly ordinaryInflight = new Map<string, Promise<void>>();
   private readonly ordinaryReplay = new Map<string, OrdinaryReplayEntry>();
   private readonly sdkRunDriver: SdkRunDriver;
+  readonly systemPromptGate: SystemPromptGate;
 
   constructor(private readonly deps: CoordinatorDeps) {
+    this.systemPromptGate = new SystemPromptGate(deps.clock);
     this.sdkRunDriver = new SdkRunDriver({
       sdk: deps.sdk,
       clock: deps.clock,
@@ -132,6 +143,65 @@ export class RunCoordinator {
 
   ordinaryReplayCount(): number {
     return this.ordinaryReplay.size;
+  }
+
+  /**
+   * Where the client's system prompt travels for this request: as the SDK
+   * systemPrompt (replace) or inside the first user send (inline). Inline is
+   * also the fallback when the client sent no system text or the credential's
+   * account is not enabled for the option.
+   */
+  private promptPlan(parsed: ParsedMessages, auth: AuthContext): PromptPlan {
+    const host = hostSystemPrompt(parsed);
+    const digest = digestJson({ host: host ?? "" });
+    const replace =
+      this.deps.config.hostSystemPromptMode === "replace" &&
+      host !== undefined &&
+      !this.systemPromptGate.isGated(auth.fingerprint);
+    return replace ? { systemPrompt: host, omitSystem: true, mode: "replace", digest } : { omitSystem: false, mode: "inline", digest };
+  }
+
+  private bindPrompt(session: Session, plan: PromptPlan): void {
+    session.systemPromptMode = plan.mode;
+    session.systemPromptDigest = plan.digest;
+  }
+
+  /**
+   * A live handle keeps the systemPrompt it was created with, so a changed
+   * host prompt must be re-applied through Agent.resume rather than silently
+   * dropped from the send. A request without a host prompt keeps the handle.
+   */
+  private followUpAgentSource(session: Session, auth: AuthContext, plan: PromptPlan): SdkAgentSource | undefined {
+    if (!session.agent) return undefined;
+    const changed =
+      session.systemPromptMode === "replace" && plan.systemPrompt !== undefined && plan.digest !== session.systemPromptDigest;
+    if (changed && session.sdkAgentId) {
+      return { type: "resume", agentId: session.sdkAgentId, apiKey: auth.cursorApiKey, workspaceDir: this.workspaceFor(session.runtimeProfile) };
+    }
+    return { type: "existing", agent: session.agent };
+  }
+
+  /** A stored `replace` session cannot start a new turn without a prompt for the SDK to re-apply. */
+  private assertStoredPromptPresent(record: LineageRecord, parsed: ParsedMessages): void {
+    if (record.systemPromptMode === "replace" && hostSystemPrompt(parsed) === undefined) {
+      throw sessionConflict("system prompt is required to resume the stored session");
+    }
+  }
+
+  /**
+   * Mid-turn recovery re-applies the prompt the way the stored session used
+   * it, whatever the current mode: the SDK does not persist systemPrompt and
+   * the recovery text carries only tool results, so following the current
+   * mode after a restart could leave the resumed agent with no prompt at all.
+   */
+  private storedPromptPlan(record: LineageRecord, parsed: ParsedMessages, auth: AuthContext): PromptPlan {
+    const plan = this.promptPlan(parsed, auth);
+    if (record.systemPromptMode !== "replace") return { omitSystem: false, mode: "inline", digest: plan.digest };
+    const host = hostSystemPrompt(parsed);
+    if (host === undefined) throw sessionConflict("system prompt is required to resume the stored session");
+    if (plan.digest !== record.systemPromptDigest) throw sessionConflict("system prompt does not match the stored session");
+    if (this.systemPromptGate.isGated(auth.fingerprint)) throw sessionConflict("stored session needs SDK systemPrompt access");
+    return { systemPrompt: host, omitSystem: true, mode: "replace", digest: plan.digest };
   }
 
   sweepOrdinaryState(): void {
@@ -421,7 +491,8 @@ export class RunCoordinator {
       action: "rebuild",
       reason: rebuildReason,
       model: parsed.model,
-      send_chars: renderPrompt(parsed).text.length,
+      // In replace mode the system prompt is not part of the send text, so this drops accordingly.
+      send_chars: renderPrompt(parsed, { omitSystem: this.promptPlan(parsed, auth).omitSystem }).text.length,
     });
     await this.startTurn(req, res, auth, parsed, requestId, writerFactory, turn);
   }
@@ -591,7 +662,9 @@ export class RunCoordinator {
     session.hostedSearch = parsed.hostedSearch === true;
     if (ordinaryTurn) session.ordinaryReplayOwner = ordinaryTurn;
     try {
-      const prompt = sendOverride ?? renderPrompt(parsed);
+      const plan = this.promptPlan(parsed, auth);
+      this.bindPrompt(session, plan);
+      const prompt = sendOverride ?? renderPrompt(parsed, { omitSystem: plan.omitSystem });
       const pump = await this.startAndBind(
         {
           session,
@@ -599,6 +672,7 @@ export class RunCoordinator {
           agent: { type: "create", apiKey: auth.cursorApiKey, workspaceDir: this.workspaceFor(profile) },
           send: prompt,
           startedAt,
+          systemPrompt: plan.systemPrompt,
         },
         logicalKey,
       );
@@ -628,9 +702,8 @@ export class RunCoordinator {
     if (await this.tryReconnectLogicalRun(req, res, parsed, requestId, writerFactory, logicalKey)) {
       return;
     }
-    const agentSource = options.agent ?? (session.agent
-      ? { type: "existing" as const, agent: session.agent }
-      : undefined);
+    const plan = this.promptPlan(parsed, auth);
+    const agentSource = options.agent ?? this.followUpAgentSource(session, auth, plan);
     if (!agentSource) {
       throw sessionLost("Session cannot accept a follow-up send");
     }
@@ -650,7 +723,9 @@ export class RunCoordinator {
     session.lastResultDigest = undefined;
     session.replay = undefined;
     session.appliedBoundaryId = undefined;
-    const prompt = options.send ?? renderPrompt(parsed);
+    // An existing handle keeps the prompt it was created with; only create/resume take systemPrompt.
+    if (agentSource.type !== "existing") this.bindPrompt(session, plan);
+    const prompt = options.send ?? renderPrompt(parsed, { omitSystem: plan.omitSystem });
     try {
       const pump = await this.startAndBind(
         {
@@ -660,6 +735,7 @@ export class RunCoordinator {
           send: prompt,
           afterAgentReady: options.afterAgentReady,
           startedAt,
+          systemPrompt: plan.systemPrompt,
         },
         logicalKey,
       );
@@ -838,7 +914,7 @@ export class RunCoordinator {
   ): Promise<void> {
     let recovery: ReturnType<typeof buildTranscriptRecovery>;
     try {
-      recovery = buildTranscriptRecovery(parsed, results);
+      recovery = buildTranscriptRecovery(parsed, results, { omitSystem: this.promptPlan(parsed, auth).omitSystem });
     } catch (error) {
       if (routingError) throw routingError;
       throw error;
@@ -885,6 +961,8 @@ export class RunCoordinator {
     this.beginOrdinaryReplaySegment(session, auth, parsed);
     session.lastResultDigest = batchDigest(results);
     try {
+      const plan = this.promptPlan(parsed, auth);
+      this.bindPrompt(session, plan);
       const pump = await this.startAndBind(
         {
           session,
@@ -892,6 +970,7 @@ export class RunCoordinator {
           agent: { type: "create", apiKey: auth.cursorApiKey, workspaceDir: this.workspaceFor(profile) },
           send: { text: recovery.prompt, images: parsed.images },
           completedResults: recovery.completedResults,
+          systemPrompt: plan.systemPrompt,
         },
         this.logicalKeyFor(auth, parsed),
       );
@@ -922,6 +1001,8 @@ export class RunCoordinator {
     if (parsed.modelParams.length > 0 && !sameModelParams(record.modelParams ?? [], parsed.modelParams)) {
       throw sessionConflict("model parameters do not match the stored session");
     }
+    // Mid-turn: the model is still inside the generation that used the stored prompt.
+    const plan = this.storedPromptPlan(record, parsed, auth);
     const requestedIds = results.map((result) => result.toolUseId).sort();
     const persistedIds = [...record.pendingToolIds].sort();
     if (JSON.stringify(requestedIds) !== JSON.stringify(persistedIds)) {
@@ -945,7 +1026,7 @@ export class RunCoordinator {
     }
     let recovery = inFlight;
     if (!recovery) {
-      const promise = this.openPendingLineage(auth, parsed, results, record, digest);
+      const promise = this.openPendingLineage(auth, parsed, results, record, digest, plan);
       recovery = { digest, promise };
       this.pendingRecoveries.set(record.sessionId, recovery);
       void promise.finally(() => {
@@ -964,6 +1045,7 @@ export class RunCoordinator {
     results: ParsedToolResult[],
     record: LineageRecord,
     digest: string,
+    plan: PromptPlan,
   ): Promise<{ session: Session; pump: EventPump }> {
     const boundProfile = record.runtimeProfile ?? DEFAULT_RUNTIME_PROFILE;
     this.deps.registry.assertCanActivateRun({
@@ -987,6 +1069,7 @@ export class RunCoordinator {
     this.deps.registry.adopt(session);
 
     try {
+      this.bindPrompt(session, plan);
       const pump = await this.startAndBind(
         {
           session,
@@ -998,6 +1081,7 @@ export class RunCoordinator {
             workspaceDir: this.workspaceFor(boundProfile),
           },
           send: { text: recoveredToolResultPrompt(record, results), force: true },
+          systemPrompt: plan.systemPrompt,
         },
         this.logicalKeyFor(auth, parsed),
       );
@@ -1072,6 +1156,7 @@ export class RunCoordinator {
               session_id: session.sessionId,
               pending_count: session.unresolvedIds().length,
               stop_reason: "tool_use",
+              system_prompt_mode: session.systemPromptMode,
               ...session.pump?.timingSummary(),
             },
             "awaiting tool results",
@@ -1085,6 +1170,7 @@ export class RunCoordinator {
               session_id: session.sessionId,
               stop_reason: "end_turn",
               usage_status: boundary.turn.usage.usage_status,
+              system_prompt_mode: session.systemPromptMode,
               ...session.pump?.timingSummary(),
             },
             "turn completed",
@@ -1095,6 +1181,13 @@ export class RunCoordinator {
       this.persistLedgerBoundary(session, boundary);
     }
     if (boundary.type === "error") {
+      // The systemPrompt gate surfaces through the run stream. Leave the response
+      // unwritten so the request can be retried inline before any output.
+      if (!res.headersSent && !session.hasSemanticOutput && SystemPromptGate.matches(boundary.error)) {
+        this.systemPromptGate.markGated(session.credentialFingerprint);
+        this.deps.registry.forget(session, "system_prompt_gated");
+        throw boundary.error;
+      }
       try {
         writer.fail(boundary.error);
       } catch {
@@ -1133,6 +1226,8 @@ export class RunCoordinator {
     if (parsed.modelParams.length > 0 && !sameModelParams(record.modelParams ?? [], parsed.modelParams)) {
       throw sessionConflict("model parameters do not match the stored session");
     }
+    // A new turn may carry a changed prompt (resume re-applies it) but not none.
+    this.assertStoredPromptPresent(record, parsed);
     if (record.state !== "completed" || !record.sdkAgentId) {
       throw sessionLost("Session is not a completed Agent lineage");
     }
@@ -1204,6 +1299,10 @@ export class RunCoordinator {
     // duplicate-same still replays from memory. A later self-contained retry
     // uses transcript recovery instead of a persisted assistant response body.
     if (session.lastResultDigest) record.lastResultDigest = session.lastResultDigest;
+    if (session.systemPromptMode) {
+      record.systemPromptMode = session.systemPromptMode;
+      record.systemPromptDigest = session.systemPromptDigest;
+    }
     try {
       this.deps.lineage.put(record);
     } catch {

@@ -52,7 +52,16 @@ export interface FakeSdkOptions {
   resumeError?: { message: string; name?: string };
   /** Invoke these custom tools synchronously inside resumeAgent(), before the Agent is returned. */
   resumeEarlyToolCalls?: Array<{ name: string; input: Record<string, unknown>; id?: string }>;
+  /**
+   * Mirror an account without SDK systemPrompt access: create/resume succeed and
+   * the first run of an agent created with systemPrompt fails naming the flag.
+   * Live SDK 1.0.31 reports it through the run stream ("run", default); "send"
+   * rejects the send() promise instead.
+   */
+  systemPromptGated?: boolean | "run" | "send";
 }
+
+const SYSTEM_PROMPT_GATE_MESSAGE = "[invalid_argument] unknown option '--system-prompt'";
 
 type FakeToolStep = Extract<FakeStep, { type: "tools" }>;
 
@@ -282,13 +291,21 @@ export class FakeAgent implements SdkAgent {
     private readonly finalUsage: SdkUsage | undefined,
     private readonly liveUsage: SdkUsage | undefined,
     agentId?: string,
+    private readonly systemPromptGated: boolean | "run" | "send" = false,
   ) {
     this.agentId = agentId ?? `agent-${randomUUID()}`;
   }
 
   async send(sendInput: SdkSendInput): Promise<SdkRun> {
     this.lastSend = sendInput;
-    const script = this.scripts[Math.min(this.sendCount, this.scripts.length - 1)] ?? [{ type: "text", chunks: ["ok"] }];
+    const gated = this.systemPromptGated && this.input.systemPrompt && this.sendCount === 0;
+    if (gated && this.systemPromptGated === "send") {
+      this.sendCount += 1;
+      throw Object.assign(new Error(SYSTEM_PROMPT_GATE_MESSAGE), { code: "invalid_argument" });
+    }
+    const script = gated
+      ? [{ type: "error" as const, message: SYSTEM_PROMPT_GATE_MESSAGE }]
+      : this.scripts[Math.min(this.sendCount, this.scripts.length - 1)] ?? [{ type: "text", chunks: ["ok"] }];
     this.sendCount += 1;
     const sendError = script.find((step) => step.type === "send-error");
     if (sendError?.type === "send-error") {
@@ -392,6 +409,8 @@ export class FakeSdk implements SdkRuntime {
       this.takeScripts([[{ type: "text", chunks: ["hello"] }]]),
       this.options.finalUsage,
       this.options.liveUsage,
+      undefined,
+      this.options.systemPromptGated ?? false,
     );
     this.agents.push(agent);
     return agent;
@@ -415,6 +434,7 @@ export class FakeSdk implements SdkRuntime {
       this.options.finalUsage,
       this.options.liveUsage,
       input.agentId,
+      this.options.systemPromptGated ?? false,
     );
     this.agents.push(agent);
     return agent;

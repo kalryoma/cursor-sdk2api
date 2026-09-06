@@ -29,7 +29,7 @@ const jsonSchema = {
 };
 
 test("json_schema intent is forwarded as an explicit output contract", async () => {
-  ctx = await startTestApp({ sdk: { scripts: [[{ type: "text", chunks: ['{"answer":"ok"}'] }]] } });
+  ctx = await startTestApp({ config: { hostSystemPromptMode: "replace" }, sdk: { scripts: [[{ type: "text", chunks: ['{"answer":"ok"}'] }]] } });
   const response = await api(ctx, "/v1/responses", {
     method: "POST",
     body: JSON.stringify({
@@ -39,10 +39,12 @@ test("json_schema intent is forwarded as an explicit output contract", async () 
     }),
   });
   expect(response.status).toBe(200);
-  const prompt = ctx.sdk.agents[0]?.lastSend?.text ?? "";
+  // The output contract is system-level text; in replace mode it rides on the SDK systemPrompt.
+  const prompt = ctx.sdk.agents[0]?.input.systemPrompt ?? "";
   expect(prompt).toContain("OUTPUT FORMAT:");
   expect(prompt).toContain("Return only valid JSON matching schema answer");
   expect(prompt).toContain('"additionalProperties":false');
+  expect(ctx.sdk.agents[0]?.lastSend?.text).not.toContain("OUTPUT FORMAT:");
 });
 
 test("unknown text formats fail closed instead of disappearing", () => {

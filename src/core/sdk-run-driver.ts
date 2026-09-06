@@ -28,6 +28,8 @@ export interface DriveSdkRunInput {
   afterAgentReady?: (agent: SdkAgent) => void;
   /** Clock time the request was admitted; anchors the segment timing fields. */
   startedAt?: number;
+  /** Host system prompt for Agent.create / Agent.resume; ignored for an existing handle. */
+  systemPrompt?: string;
 }
 
 export interface SdkRunDriverDeps {
@@ -52,6 +54,10 @@ export class SdkRunDriver {
       input.completedResults,
     );
     const agent = await this.resolveAgent(input, customTools);
+    if (session.agent && session.agent !== agent) {
+      // A resume re-applied the systemPrompt to the same agentId; the old handle is superseded.
+      void Promise.resolve(session.agent.close()).catch(() => undefined);
+    }
     session.agent = agent;
     session.sdkAgentId = agent.agentId;
     input.afterAgentReady?.(agent);
@@ -95,6 +101,7 @@ export class SdkRunDriver {
       customTools,
       runtimeProfile: input.session.runtimeProfile,
       hostedSearch: input.session.hostedSearch,
+      ...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
     };
     if (input.agent.type === "existing") return Promise.resolve(input.agent.agent);
     if (input.agent.type === "resume") {

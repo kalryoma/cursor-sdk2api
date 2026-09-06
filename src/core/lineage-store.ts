@@ -19,6 +19,9 @@ export interface LineageRecord {
   pendingToolIds: string[];
   pendingCalls?: Array<{ toolUseId: string; name: string }>;
   lastResultDigest?: string;
+  /** The SDK does not persist systemPrompt across resume; a resume must re-apply the same prompt. */
+  systemPromptMode?: "replace" | "inline";
+  systemPromptDigest?: string;
   createdAt: number;
   lastActivityAt: number;
   expiresAt: number;
@@ -231,5 +234,7 @@ function isLineageRecord(value: unknown): value is LineageRecord {
     return false;
   }
   if (record.lastResultDigest !== undefined && typeof record.lastResultDigest !== "string") return false;
+  if (record.systemPromptMode !== undefined && record.systemPromptMode !== "replace" && record.systemPromptMode !== "inline") return false;
+  if (record.systemPromptDigest !== undefined && typeof record.systemPromptDigest !== "string") return false;
   return true;
 }

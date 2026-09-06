@@ -300,22 +300,34 @@ export function stringifyToolResult(content: unknown): string {
   }
 }
 
+const HARNESS_TOOL_CONTEXT = [
+  "HARNESS TOOL CONTEXT:",
+  "The custom MCP tools execute in the API caller's environment, not in the Cursor SDK runtime workspace.",
+  "Never use the SDK runtime cwd in tool arguments. Treat workspace metadata supplied by the client as authoritative.",
+  "Prefer relative paths when the tool schema allows them. If a tool requires an absolute path, resolve it against the client's workspace path.",
+].join("\n");
+
+/**
+ * The client's system prompt as an SDK `systemPrompt`, or `undefined` when the
+ * client sent none. Replacing Cursor's harness prompt drops its tool-use
+ * guidance, so the harness tool context is restated whenever tools exist.
+ */
+export function hostSystemPrompt(parsed: ParsedMessages): string | undefined {
+  const text = parsed.systemText.trim();
+  if (!text) return undefined;
+  return parsed.tools.length > 0 ? `${HARNESS_TOOL_CONTEXT}\n\n${text}` : text;
+}
+
 export function renderPrompt(
   parsed: ParsedMessages,
-  options: { includeContinuation?: boolean } = {},
+  options: { includeContinuation?: boolean; omitSystem?: boolean } = {},
 ): { text: string; images: Array<{ data: string; mimeType: string }> } {
   const parts: string[] = [];
-  if (parsed.tools.length > 0) {
-    parts.push(
-      [
-        "HARNESS TOOL CONTEXT:",
-        "The custom MCP tools execute in the API caller's environment, not in the Cursor SDK runtime workspace.",
-        "Never use the SDK runtime cwd in tool arguments. Treat workspace metadata supplied by the client as authoritative.",
-        "Prefer relative paths when the tool schema allows them. If a tool requires an absolute path, resolve it against the client's workspace path.",
-      ].join("\n"),
-    );
+  // With omitSystem the same text travels as the SDK systemPrompt instead.
+  if (!options.omitSystem) {
+    if (parsed.tools.length > 0) parts.push(HARNESS_TOOL_CONTEXT);
+    if (parsed.systemText) parts.push(`System:\n${parsed.systemText}`);
   }
-  if (parsed.systemText) parts.push(`System:\n${parsed.systemText}`);
   const messages = parsed.continuation && !options.includeContinuation
     ? parsed.messages.slice(0, -1)
     : parsed.messages;

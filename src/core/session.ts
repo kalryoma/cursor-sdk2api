@@ -70,6 +70,10 @@ export class Session {
   retainUntil = 0;
   runtimeProfile: RuntimeProfile = DEFAULT_RUNTIME_PROFILE;
   hostedSearch = false;
+  /** How the client's system prompt reached the Agent this session was created or resumed with. */
+  systemPromptMode?: "replace" | "inline";
+  /** Digest of the host prompt bound to the Agent; a different prompt must be re-applied, never dropped. */
+  systemPromptDigest?: string;
   logicalKey?: string;
   ledgerRunId?: string;
   ledgerGeneration = 0;

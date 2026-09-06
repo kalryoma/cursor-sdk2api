@@ -130,6 +130,11 @@ export interface CreateAgentInput {
   customTools: Record<string, SdkCustomTool>;
   runtimeProfile?: RuntimeProfile;
   hostedSearch?: boolean;
+  /**
+   * Replaces Cursor's built-in harness prompt for the main agent loop. Not
+   * persisted by the SDK, so every resume passes it again. Never logged.
+   */
+  systemPrompt?: string;
 }
 
 export interface ResumeAgentInput extends CreateAgentInput {

@@ -13,6 +13,13 @@ import { resolveOutboundProxy } from "./sdk/proxy.js";
 
 export type AuthMode = "byok" | "managed";
 
+/**
+ * `inline` (default): the client system prompt travels inside the first user
+ * send. `replace`: it becomes the SDK `systemPrompt` and the inline `System:`
+ * block is dropped; opt-in until verified live on an enabled account.
+ */
+export type HostSystemPromptMode = "replace" | "inline";
+
 const PACKAGE_VERSION = (createRequire(import.meta.url)("../package.json") as { version: string }).version;
 
 export interface GatewayConfig {
@@ -35,6 +42,7 @@ export interface GatewayConfig {
   toolBatchSettleMs: number;
   /** SSE keep-alive interval once a stream has started; 0 disables. */
   sseHeartbeatMs: number;
+  hostSystemPromptMode: HostSystemPromptMode;
   catalogCacheMs: number;
   sweepIntervalMs: number;
   maxBodyBytes: number;
@@ -115,6 +123,12 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+function envHostSystemPromptMode(): HostSystemPromptMode {
+  const raw = (process.env.HOST_SYSTEM_PROMPT_MODE ?? "inline").trim().toLowerCase();
+  if (raw === "replace" || raw === "inline") return raw;
+  throw new Error("Environment variable HOST_SYSTEM_PROMPT_MODE must be replace or inline");
+}
+
 export function loadConfig(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
   const authMode = (process.env.AUTH_MODE === "managed" ? "managed" : "byok") as AuthMode;
   const sessionTtlMs = clamp(envInt("SESSION_TTL_MS", 30 * 60_000), 5 * 60_000, 60 * 60_000);
@@ -145,6 +159,7 @@ export function loadConfig(overrides: Partial<GatewayConfig> = {}): GatewayConfi
     ),
     toolBatchSettleMs: envInt("TOOL_BATCH_SETTLE_MS", 1_500),
     sseHeartbeatMs: envInt("SSE_HEARTBEAT_MS", 15_000),
+    hostSystemPromptMode: envHostSystemPromptMode(),
     catalogCacheMs: envInt("CATALOG_CACHE_MS", 5 * 60_000),
     sweepIntervalMs: envInt("SWEEP_INTERVAL_MS", 5_000),
     // OpenCodex Chat Completions history with image tool output exceeds 2 MiB.

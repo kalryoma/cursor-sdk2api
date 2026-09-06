@@ -84,6 +84,7 @@ test("non-stream text returns a response object", async () => {
 
 test("instructions and developer items stay in system context", async () => {
   ctx = await startTestApp({
+    config: { hostSystemPromptMode: "replace" },
     sdk: { scripts: [[{ type: "text", chunks: ["ok"] }]] },
   });
   const res = await api(ctx, "/v1/responses", {
@@ -106,7 +107,9 @@ test("instructions and developer items stay in system context", async () => {
     }),
   });
   expect(res.status).toBe(200);
-  expect(ctx.sdk.agents[0]?.lastSend?.text).toContain("System:\ntop rule\ndeveloper rule");
+  // HOST_SYSTEM_PROMPT_MODE=replace: instructions and developer text become the SDK systemPrompt.
+  expect(ctx.sdk.agents[0]?.input.systemPrompt).toBe("top rule\ndeveloper rule");
+  expect(ctx.sdk.agents[0]?.lastSend?.text).not.toContain("System:");
   expect(ctx.sdk.agents[0]?.lastSend?.text).toContain("user:\nhello");
   expect(ctx.sdk.agents[0]?.lastSend?.text).not.toContain("user:\ndeveloper rule");
 });
@@ -565,7 +568,7 @@ test("stream function_call arguments are JSON on the done event", async () => {
 
 test("stream emits each function_call item when the SDK requests it and closes the open message first", async () => {
   ctx = await startTestApp({
-    config: { toolBatchSettleMs: 5_000 },
+    config: { toolBatchSettleMs: 300 },
     sdk: {
       scripts: [
         [
