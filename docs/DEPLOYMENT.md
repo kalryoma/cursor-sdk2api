@@ -115,4 +115,4 @@ Completed follow-up after restart requires the same `STATE_DIR` volume, `x-curso
 
 ## Resource defaults
 
-Development defaults: 8 global active runs, 3 per credential, 30 minute awaiting TTL, 10 minute replay TTL, 60 minute run deadline, and 40 seconds to the first SDK event.
+Development defaults: 8 global active runs, 3 per credential, 30 minute awaiting TTL, 10 minute replay TTL, 60 minute run deadline, 40 seconds to the first SDK event, 1.5 s tool-batch settle (`TOOL_BATCH_SETTLE_MS`; `TOOL_BATCH_IDLE_MS` off), 15 s SSE keep-alive (`SSE_HEARTBEAT_MS`), and `HOST_SYSTEM_PROMPT_MODE=inline` (`replace` is opt-in, with inline fallback for gated accounts).
