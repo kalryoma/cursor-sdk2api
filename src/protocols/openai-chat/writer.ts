@@ -1,7 +1,7 @@
 import { chatCompletionId } from "../../ids.js";
-import type { TurnWriter, TurnWriterContext, TurnWriterFactory } from "../../core/turn-writer.js";
+import { unwrittenTail, type TurnWriter, type TurnWriterContext, type TurnWriterFactory } from "../../core/turn-writer.js";
 import { sendJson, sendOpenAIError } from "../../server/http-util.js";
-import type { AnthropicContentBlock, AssistantTurn, ToolUseBlock } from "../anthropic/types.js";
+import type { AssistantTurn, ToolUseBlock } from "../anthropic/types.js";
 import { encodeChatChunk, encodeChatCompletion, encodeChatToolCall, encodeChatUsage, mapChatFinishReason } from "./encode.js";
 import { beginChatSse, writeChatDone, writeChatFrame, writeChatStreamError } from "./sse.js";
 
@@ -12,8 +12,8 @@ export function createChatWriterFactory(options: { includeUsage: boolean }): Tur
 class ChatTurnWriter implements TurnWriter {
   private started = false;
   private roleSent = false;
-  private emittedText = false;
-  private emittedThinking = false;
+  private writtenText = 0;
+  private writtenThinking = 0;
   private toolIndex = 0;
   private readonly emittedTools = new Set<string>();
   private readonly completionId: string;
@@ -36,14 +36,22 @@ class ChatTurnWriter implements TurnWriter {
   onThinking(text: string): void {
     if (!this.ctx.stream || this.dead() || !text) return;
     this.ensureStart();
-    this.emittedThinking = true;
-    this.writeDelta({ reasoning_content: text });
+    this.writeThinking(text);
   }
 
   onText(text: string): void {
     if (!this.ctx.stream || this.dead() || !text) return;
     this.ensureStart();
-    this.emittedText = true;
+    this.writeText(text);
+  }
+
+  private writeThinking(text: string): void {
+    this.writtenThinking += text.length;
+    this.writeDelta({ reasoning_content: text });
+  }
+
+  private writeText(text: string): void {
+    this.writtenText += text.length;
     this.writeDelta({ content: text });
   }
 
@@ -96,21 +104,19 @@ class ChatTurnWriter implements TurnWriter {
     sendOpenAIError(this.ctx.res, error, this.ctx.requestId);
   }
 
+  /** Write whatever the turn holds that was not streamed, in block order. */
   private emitRemaining(turn: AssistantTurn): void {
     if (this.dead()) return;
-    if (!this.emittedThinking) {
-      const thinking = textOf(turn.blocks, "thinking");
-      if (thinking) this.writeDelta({ reasoning_content: thinking });
+    const tail = unwrittenTail(turn.blocks, {
+      textChars: this.writtenText,
+      thinkingChars: this.writtenThinking,
+      toolIds: this.emittedTools,
+    });
+    for (const segment of tail) {
+      if (segment.kind === "tool_use") this.writeToolCalls([segment.block]);
+      else if (segment.kind === "thinking") this.writeThinking(segment.text);
+      else this.writeText(segment.text);
     }
-    if (!this.emittedText) {
-      const text = textOf(turn.blocks, "text");
-      if (text) this.writeDelta({ content: text });
-    }
-    this.writeToolCalls(
-      turn.blocks.filter(
-        (block): block is ToolUseBlock => block.type === "tool_use" && !this.emittedTools.has(block.id),
-      ),
-    );
   }
 
   private writeToolCalls(blocks: ToolUseBlock[]): void {
@@ -148,11 +154,4 @@ class ChatTurnWriter implements TurnWriter {
   private dead(): boolean {
     return this.ctx.res.destroyed || this.ctx.res.writableEnded;
   }
-}
-
-function textOf(blocks: AnthropicContentBlock[], type: "text" | "thinking"): string {
-  return blocks
-    .filter((block) => block.type === type)
-    .map((block) => (block.type === "text" ? block.text : block.type === "thinking" ? block.thinking : ""))
-    .join("");
 }

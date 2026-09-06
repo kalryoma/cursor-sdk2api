@@ -55,6 +55,16 @@ export function functionCallItemId(callId: string): string {
   return callId.startsWith("fc_") ? callId : `fc_${callId}`;
 }
 
+/**
+ * Id seed for the n-th reasoning or message item of a turn. The first item of
+ * a kind derives from the message id; later ones, reopened after a tool call,
+ * add their output index. The stream writer and the final encoder both use
+ * this so `response.completed.output` matches the streamed items.
+ */
+export function responsesItemSeed(messageId: string, ordinal: number, outputIndex: number): string {
+  return ordinal === 0 ? messageId : `${messageId}_${outputIndex}`;
+}
+
 export function encodeReasoningItem(messageId: string, text: string): Record<string, unknown> {
   return {
     id: reasoningItemId(messageId),
@@ -106,14 +116,20 @@ export function encodeCustomToolCallItem(
   };
 }
 
+/** Output items in block order; one item per contiguous thinking or text run. */
 export function encodeResponsesOutput(turn: AssistantTurn): Record<string, unknown>[] {
   const output: Record<string, unknown>[] = [];
-  const thinking = textOf(turn.blocks, "thinking");
-  if (thinking) output.push(encodeReasoningItem(turn.messageId, thinking));
-  const text = textOf(turn.blocks, "text");
-  if (text) output.push(encodeMessageItem(turn.messageId, text));
+  let reasoningOrdinal = 0;
+  let messageOrdinal = 0;
   for (const block of turn.blocks) {
-    if (block.type === "tool_use") {
+    const outputIndex = output.length;
+    if (block.type === "thinking") {
+      if (!block.thinking) continue;
+      output.push(encodeReasoningItem(responsesItemSeed(turn.messageId, reasoningOrdinal++, outputIndex), block.thinking));
+    } else if (block.type === "text") {
+      if (!block.text) continue;
+      output.push(encodeMessageItem(responsesItemSeed(turn.messageId, messageOrdinal++, outputIndex), block.text));
+    } else if (block.type === "tool_use") {
       output.push(block.tool_kind === "custom" ? encodeCustomToolCallItem(block) : encodeFunctionCallItem(block));
     }
   }

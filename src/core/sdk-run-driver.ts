@@ -35,29 +35,6 @@ export interface SdkRunDriverDeps {
   firstEventTimeoutMs: number;
 }
 
-function createDeltaBridge() {
-  const early: SdkDeltaUpdate[] = [];
-  let pump: EventPump | undefined;
-  const ingest = (update: SdkDeltaUpdate) => {
-    early.push(update);
-    flush();
-  };
-  const flush = () => {
-    if (!pump) return;
-    while (early.length > 0) {
-      const next = early.shift();
-      if (next) pump.ingestDelta(next);
-    }
-  };
-  return {
-    ingest,
-    attach(next: EventPump) {
-      pump = next;
-      flush();
-    },
-  };
-}
-
 export class SdkRunDriver {
   constructor(private readonly deps: SdkRunDriverDeps) {}
 
@@ -77,13 +54,18 @@ export class SdkRunDriver {
     session.sdkAgentId = agent.agentId;
     input.afterAgentReady?.(agent);
 
-    const deltas = createDeltaBridge();
+    // Deltas and tool callbacks that fire before the pump exists share one
+    // queue with the tool bridge, so their relative order survives the attach.
+    const onDelta = (update: SdkDeltaUpdate) => {
+      if (session.pump) session.pump.ingestDelta(update);
+      else session.earlyEvents.push({ type: "delta", update });
+    };
     const run = await agent.send({
       text: input.send.text,
       images: input.send.images,
       customTools,
       force: input.send.force,
-      onDelta: deltas.ingest,
+      onDelta,
     });
     session.run = run;
     const pump = new EventPump(
@@ -94,8 +76,7 @@ export class SdkRunDriver {
       this.deps.firstEventTimeoutMs,
     );
     session.pump = pump;
-    deltas.attach(pump);
-    pump.ingestEarly(session.earlyCalls.splice(0));
+    pump.ingestEarly(session.earlyEvents.splice(0));
     return pump;
   }
 

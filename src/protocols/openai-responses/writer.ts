@@ -1,5 +1,5 @@
 import { responseId } from "../../ids.js";
-import type { TurnWriter, TurnWriterContext, TurnWriterFactory } from "../../core/turn-writer.js";
+import { unwrittenTail, type TurnWriter, type TurnWriterContext, type TurnWriterFactory } from "../../core/turn-writer.js";
 import { sendJson, sendOpenAIError } from "../../server/http-util.js";
 import type { AssistantTurn, ToolUseBlock } from "../anthropic/types.js";
 import {
@@ -11,7 +11,7 @@ import {
   encodeInProgressResponse,
   functionCallItemId,
   reasoningItemId,
-  textOf,
+  responsesItemSeed,
 } from "./encode.js";
 import { beginResponsesSse, writeResponsesEvent, writeResponsesStreamError } from "./sse.js";
 
@@ -25,6 +25,10 @@ class ResponsesTurnWriter implements TurnWriter {
   private nextOutputIndex = 0;
   private reasoning?: StreamItem;
   private message?: StreamItem;
+  private reasoningOrdinal = 0;
+  private messageOrdinal = 0;
+  private writtenThinking = 0;
+  private writtenText = 0;
   private readonly emittedTools = new Set<string>();
   private readonly id: string;
   private readonly createdAt: number;
@@ -44,8 +48,21 @@ class ResponsesTurnWriter implements TurnWriter {
   onThinking(text: string): void {
     if (!this.ctx.stream || this.dead() || !text) return;
     this.ensureStart();
+    this.appendThinking(text);
+  }
+
+  onText(text: string): void {
+    if (!this.ctx.stream || this.dead() || !text) return;
+    this.ensureStart();
+    this.appendText(text);
+  }
+
+  /** Items are contiguous runs: switching kind closes the other open item. */
+  private appendThinking(text: string): void {
+    if (this.message && !this.message.done) this.closeMessage(this.message);
     const item = this.ensureReasoning();
     item.text += text;
+    this.writtenThinking += text.length;
     this.emit("response.reasoning_summary_text.delta", {
       item_id: item.itemId,
       output_index: item.outputIndex,
@@ -54,11 +71,11 @@ class ResponsesTurnWriter implements TurnWriter {
     });
   }
 
-  onText(text: string): void {
-    if (!this.ctx.stream || this.dead() || !text) return;
-    this.ensureStart();
+  private appendText(text: string): void {
+    if (this.reasoning && !this.reasoning.done) this.closeReasoning(this.reasoning);
     const item = this.ensureMessage();
     item.text += text;
+    this.writtenText += text.length;
     this.emit("response.output_text.delta", {
       item_id: item.itemId,
       output_index: item.outputIndex,
@@ -102,19 +119,24 @@ class ResponsesTurnWriter implements TurnWriter {
     sendOpenAIError(this.ctx.res, error, this.ctx.requestId);
   }
 
+  /** Write whatever the turn holds that was not streamed, in block order. */
   private emitRemaining(turn: AssistantTurn): void {
-    if (!this.reasoning) {
-      const thinking = textOf(turn.blocks, "thinking");
-      if (thinking) this.onThinking(thinking);
-    }
-    if (!this.message) {
-      const text = textOf(turn.blocks, "text");
-      if (text) this.onText(text);
+    const tail = unwrittenTail(turn.blocks, {
+      textChars: this.writtenText,
+      thinkingChars: this.writtenThinking,
+      toolIds: this.emittedTools,
+    });
+    for (const segment of tail) {
+      if (segment.kind === "tool_use") {
+        this.finalizeItems();
+        this.emitToolCall(segment.block);
+      } else if (segment.kind === "thinking") {
+        this.appendThinking(segment.text);
+      } else {
+        this.appendText(segment.text);
+      }
     }
     this.finalizeItems();
-    for (const block of turn.blocks) {
-      if (block.type === "tool_use" && !this.emittedTools.has(block.id)) this.emitToolCall(block);
-    }
   }
 
   private emitToolCall(block: ToolUseBlock): void {
@@ -123,15 +145,10 @@ class ResponsesTurnWriter implements TurnWriter {
     else this.emitFunctionCall(block);
   }
 
-  /** Items reopened after a mid-stream tool call get their own id. */
-  private itemSeed(previous: StreamItem | undefined, outputIndex: number): string {
-    return previous ? `${this.ctx.messageId}_${outputIndex}` : this.ctx.messageId;
-  }
-
   private ensureReasoning(): StreamItem {
     if (this.reasoning && !this.reasoning.done) return this.reasoning;
     const outputIndex = this.nextOutputIndex++;
-    const seed = this.itemSeed(this.reasoning, outputIndex);
+    const seed = responsesItemSeed(this.ctx.messageId, this.reasoningOrdinal++, outputIndex);
     const itemId = reasoningItemId(seed);
     const item = { ...encodeReasoningItem(seed, ""), summary: [] };
     this.emit("response.output_item.added", { output_index: outputIndex, item });
@@ -148,7 +165,7 @@ class ResponsesTurnWriter implements TurnWriter {
   private ensureMessage(): StreamItem {
     if (this.message && !this.message.done) return this.message;
     const outputIndex = this.nextOutputIndex++;
-    const itemId = this.itemSeed(this.message, outputIndex);
+    const itemId = responsesItemSeed(this.ctx.messageId, this.messageOrdinal++, outputIndex);
     this.emit("response.output_item.added", {
       output_index: outputIndex,
       item: encodeMessageItem(itemId, "", "in_progress"),

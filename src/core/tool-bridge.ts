@@ -30,7 +30,7 @@ export function mapClientTools(
         );
         onExecute(session);
         if (session.pump) session.pump.notifyTool(call);
-        else session.earlyCalls.push(call);
+        else session.earlyEvents.push({ type: "tool", call });
         return call.promise;
       },
     };

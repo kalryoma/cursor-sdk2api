@@ -26,6 +26,8 @@ export type FakeStep =
       type: "tools";
       /** `delayMs` staggers a call's dispatch, as the live SDK does between calls of one generation. */
       calls: Array<{ name: string; input: Record<string, unknown>; id?: string; delayMs?: number }>;
+      /** Text the model emits after requesting the tools, while their results are still pending. */
+      trailingText?: string[];
     }
   | { type: "silent-final"; text: string }
   | { type: "empty" }
@@ -53,6 +55,11 @@ export interface FakeSdkOptions {
 }
 
 type FakeToolStep = Extract<FakeStep, { type: "tools" }>;
+
+/** Steps the fake fires inside send(), before the run is returned. */
+function firesDuringSend(step: FakeStep): boolean {
+  return step.type === "send-tools" || ((step.type === "text" || step.type === "thinking") && step.early === true);
+}
 
 function configuredError(input: { message: string; name?: string }): Error {
   const error = new Error(input.message);
@@ -164,6 +171,12 @@ export class FakeRun implements SdkRun {
     );
     // Rejections are observed by Promise.all(results) below; keep them handled meanwhile.
     for (const result of results) void result.catch(() => undefined);
+    for (const chunk of step.trailingText ?? []) {
+      await this.emitDelta({ type: "text-delta", text: chunk });
+      const snapshot = { type: "assistant" as const, text: chunk };
+      this.streamSnapshots.push(snapshot);
+      this.events.push(snapshot);
+    }
     await Promise.all(results);
   }
 
@@ -283,34 +296,32 @@ export class FakeAgent implements SdkAgent {
       if (sendError.name) error.name = sendError.name;
       throw error;
     }
-    let earlyCount = 0;
-    const first = script[0];
-    if (first && (first.type === "text" || first.type === "thinking") && first.early) {
-      earlyCount = first.chunks.length;
+    // The leading run of early steps fires here, in script order, so a test can
+    // interleave early deltas and synchronous tool dispatch the way the live
+    // SDK can before send() resolves.
+    const leading: FakeStep[] = [];
+    for (const step of script) {
+      if (!firesDuringSend(step)) break;
+      leading.push(step);
     }
-    const run = new FakeRun(
-      script,
-      sendInput.customTools ?? this.input.customTools,
-      this.finalUsage,
-      this.liveUsage,
-      sendInput.onDelta ?? sendInput.onEvent,
-      earlyCount,
-    );
+    const earlyCount = leading.reduce((count, step) => count + ("chunks" in step ? step.chunks.length : 0), 0);
+    const customTools = sendInput.customTools ?? this.input.customTools;
+    const run = new FakeRun(script, customTools, this.finalUsage, this.liveUsage, sendInput.onDelta ?? sendInput.onEvent, earlyCount);
     this.runs.push(run);
-    if (first?.type === "send-tools") {
-      for (const call of first.calls) {
-        const tool = (sendInput.customTools ?? this.input.customTools)[call.name];
-        if (!tool) throw new Error(`fake sdk missing tool ${call.name}`);
-        void Promise.resolve(
-          tool.execute(call.input, { toolCallId: call.id ?? `sdk_${randomUUID()}` }),
-        ).then((result) => {
-          run.capturedToolResults.push(result);
-        });
+    for (const step of leading) {
+      if (step.type === "send-tools") {
+        for (const call of step.calls) {
+          const tool = customTools[call.name];
+          if (!tool) throw new Error(`fake sdk missing tool ${call.name}`);
+          void Promise.resolve(tool.execute(call.input, { toolCallId: call.id ?? `sdk_${randomUUID()}` })).then((result) => {
+            run.capturedToolResults.push(result);
+          });
+        }
+        continue;
       }
-    }
-    if (earlyCount > 0 && first && (first.type === "text" || first.type === "thinking")) {
-      const kind = first.type === "thinking" ? "thinking-delta" : "text-delta";
-      for (const chunk of first.chunks) {
+      if (step.type !== "text" && step.type !== "thinking") continue;
+      const kind = step.type === "thinking" ? "thinking-delta" : "text-delta";
+      for (const chunk of step.chunks) {
         await run.emitEarlyForTest({ type: kind, text: chunk });
       }
     }

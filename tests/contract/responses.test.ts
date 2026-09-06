@@ -457,7 +457,22 @@ test("unsupported function_call_output image and file parts fail closed without 
   expect(ctx.sdk.agents[0]?.runs[0]?.capturedToolResults).toEqual(["72F"]);
 });
 
-test("interleaved thinking and text keep one stable item per output kind", async () => {
+function streamedItems(events: Array<{ event: string; data: unknown }>): Array<{ id: unknown; type: unknown }> {
+  return events
+    .filter((event) => event.event === "response.output_item.added")
+    .map((event) => {
+      const item = isRecord(event.data) && isRecord(event.data.item) ? event.data.item : {};
+      return { id: item.id, type: item.type };
+    });
+}
+
+function completedOutput(events: Array<{ event: string; data: unknown }>): Array<Record<string, unknown>> {
+  const completed = events.find((event) => event.event === "response.completed")?.data;
+  const output = isRecord(completed) && isRecord(completed.response) ? completed.response.output : [];
+  return Array.isArray(output) ? (output as Array<Record<string, unknown>>) : [];
+}
+
+test("interleaved thinking and text stream as ordered items whose ids match the final output", async () => {
   ctx = await startTestApp({
     sdk: {
       scripts: [
@@ -474,20 +489,47 @@ test("interleaved thinking and text keep one stable item per output kind", async
     body: JSON.stringify({ model: "composer-2.5", stream: true, input: "hi" }),
   });
   const events = parseSse(await res.text());
-  const added = events.filter((event) => event.event === "response.output_item.added");
-  const done = events.filter((event) => event.event === "response.output_item.done");
-  expect(added).toHaveLength(2);
-  expect(done).toHaveLength(2);
-  const addedIds = added.map((event) => (isRecord(event.data) && isRecord(event.data.item) ? event.data.item.id : undefined));
-  expect(new Set(addedIds).size).toBe(2);
-  const completed = events.find((event) => event.event === "response.completed")?.data;
-  const output = isRecord(completed) && isRecord(completed.response) ? (completed.response.output as unknown[]) : [];
-  expect(outputOfType({ output }, "reasoning")[0]).toMatchObject({
-    summary: [{ type: "summary_text", text: "ab" }],
+  const added = streamedItems(events);
+  expect(added.map((item) => item.type)).toEqual(["reasoning", "message", "reasoning"]);
+  expect(new Set(added.map((item) => item.id)).size).toBe(3);
+  expect(events.filter((event) => event.event === "response.output_item.done")).toHaveLength(3);
+  const output = completedOutput(events);
+  expect(output.map((item) => ({ id: item.id, type: item.type }))).toEqual(added);
+  expect(output[0]).toMatchObject({ summary: [{ type: "summary_text", text: "a" }] });
+  expect(output[1]).toMatchObject({ content: [{ type: "output_text", text: "answer" }] });
+  expect(output[2]).toMatchObject({ summary: [{ type: "summary_text", text: "b" }] });
+});
+
+test("text after a tool call keeps arrival order and ids across the stream, the final output, and the replay", async () => {
+  ctx = await startTestApp({
+    config: { toolBatchSettleMs: 100 },
+    sdk: {
+      scripts: [
+        [
+          { type: "text", chunks: ["Calling"] },
+          { type: "tools", calls: [{ name: "lookup", input: { q: "weather" } }], trailingText: [" now"] },
+          { type: "text", chunks: ["later"] },
+        ],
+      ],
+    },
   });
-  expect(outputOfType({ output }, "message")[0]).toMatchObject({
-    content: [{ type: "output_text", text: "answer" }],
+  const body = { model: "composer-2.5", input: "weather?", tools: [responsesWeatherTool()] };
+  const streamed = await api(ctx, "/v1/responses", {
+    method: "POST",
+    body: JSON.stringify({ ...body, stream: true }),
   });
+  const events = parseSse(await streamed.text());
+  const added = streamedItems(events);
+  expect(added.map((item) => item.type)).toEqual(["message", "function_call", "message"]);
+  expect(added[0]?.id).not.toBe(added[2]?.id);
+  const output = completedOutput(events);
+  expect(output.map((item) => ({ id: item.id, type: item.type }))).toEqual(added);
+  expect(output[0]).toMatchObject({ content: [{ type: "output_text", text: "Calling" }] });
+  expect(output[2]).toMatchObject({ content: [{ type: "output_text", text: " now" }] });
+  const replay = await api(ctx, "/v1/responses", { method: "POST", body: JSON.stringify(body) });
+  const replayed = (await replay.json()) as { output: Array<Record<string, unknown>> };
+  expect(replay.status).toBe(200);
+  expect(replayed.output.map((item) => ({ id: item.id, type: item.type }))).toEqual(added);
 });
 
 test("stream function_call arguments are JSON on the done event", async () => {

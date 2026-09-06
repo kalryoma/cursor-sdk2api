@@ -275,6 +275,70 @@ test("SSE writes the tool_use block when the SDK requests the tool, before the b
   expect((events.find((item) => item.event === "message_delta")?.data.delta as { stop_reason?: string })?.stop_reason).toBe("tool_use");
 });
 
+test("text after a tool call keeps arrival order in the stream, the non-stream body, and the replay", async () => {
+  ctx = await startTestApp({
+    config: { toolBatchSettleMs: 100 },
+    sdk: {
+      scripts: [
+        [
+          { type: "text", chunks: ["Calling"] },
+          { type: "tools", calls: [{ name: "lookup", input: { q: "a" } }], trailingText: [" now"] },
+          { type: "text", chunks: ["later"] },
+        ],
+      ],
+    },
+  });
+  const body = { model: "composer-2.5", max_tokens: 32, messages: [{ role: "user", content: "go" }], tools };
+  const res = await api(ctx, "/v1/messages", { method: "POST", body: JSON.stringify({ ...body, stream: true }) });
+  const events = await readTimedSse(res);
+  const starts = events.filter((item) => item.event === "content_block_start");
+  expect(starts.map((item) => (item.data.content_block as { type: string }).type)).toEqual(["text", "tool_use", "text"]);
+  expect(starts.map((item) => item.data.index)).toEqual([0, 1, 2]);
+  const textOf = (index: number) =>
+    events
+      .filter((item) => item.event === "content_block_delta" && item.data.index === index)
+      .map((item) => (item.data.delta as { text?: string }).text ?? "")
+      .join("");
+  expect(textOf(0)).toBe("Calling");
+  expect(textOf(2)).toBe(" now");
+  const replay = await api(ctx, "/v1/messages", { method: "POST", body: JSON.stringify(body) });
+  const replayed = (await replay.json()) as { content: Array<{ type: string; text?: string; name?: string }> };
+  expect(replay.status).toBe(200);
+  expect(replayed.content.map((block) => block.type)).toEqual(["text", "tool_use", "text"]);
+  expect(replayed.content.map((block) => block.text ?? block.name)).toEqual(["Calling", "lookup", " now"]);
+});
+
+test("deltas and tool callbacks that fire before send() resolves keep their relative order", async () => {
+  ctx = await startTestApp({
+    config: { toolBatchSettleMs: 50 },
+    sdk: {
+      scripts: [
+        [
+          { type: "text", chunks: ["BEFORE"], early: true },
+          { type: "send-tools", calls: [{ name: "lookup", input: { q: "a" } }] },
+          { type: "text", chunks: ["AFTER"], early: true },
+          { type: "hang" },
+        ],
+      ],
+    },
+  });
+  const body = { model: "composer-2.5", max_tokens: 32, messages: [{ role: "user", content: "go" }], tools };
+  const res = await api(ctx, "/v1/messages", { method: "POST", body: JSON.stringify({ ...body, stream: true }) });
+  const events = await readTimedSse(res);
+  const starts = events.filter((item) => item.event === "content_block_start");
+  expect(starts.map((item) => (item.data.content_block as { type: string }).type)).toEqual(["text", "tool_use", "text"]);
+  const textOf = (index: number) =>
+    events
+      .filter((item) => item.event === "content_block_delta" && item.data.index === index)
+      .map((item) => (item.data.delta as { text?: string }).text ?? "")
+      .join("");
+  expect(textOf(0)).toBe("BEFORE");
+  expect(textOf(2)).toBe("AFTER");
+  const replay = await api(ctx, "/v1/messages", { method: "POST", body: JSON.stringify(body) });
+  const replayed = (await replay.json()) as { content: Array<{ type: string; text?: string; name?: string }> };
+  expect(replayed.content.map((block) => block.text ?? block.name)).toEqual(["BEFORE", "lookup", "AFTER"]);
+});
+
 test("a callback arriving after the published batch fails closed instead of becoming hidden pending state", async () => {
   ctx = await startTestApp({
     config: { toolBatchSettleMs: 10 },

@@ -1,6 +1,6 @@
 import { sessionId, toolUseId } from "../ids.js";
 import type { Clock } from "../clock.js";
-import type { SdkAgent, SdkCustomToolResult, SdkRun } from "../sdk/port.js";
+import type { SdkAgent, SdkCustomToolResult, SdkDeltaUpdate, SdkRun } from "../sdk/port.js";
 import type { AssistantTurn } from "../protocols/anthropic/types.js";
 import type { CursorAgentTurn } from "./cursor-agent-turn.js";
 import type { EventPump } from "./event-pump.js";
@@ -36,6 +36,11 @@ export interface ReplayRecord {
   createdAt: number;
 }
 
+/** SDK output that arrived before the pump was attached, in arrival order. */
+export type EarlyEvent =
+  | { type: "delta"; update: SdkDeltaUpdate }
+  | { type: "tool"; call: PendingCall };
+
 export class Session {
   readonly sessionId: string;
   readonly credentialFingerprint: string;
@@ -52,7 +57,7 @@ export class Session {
   run?: SdkRun;
   pump?: EventPump;
   readonly pending = new Map<string, PendingCall>();
-  readonly earlyCalls: PendingCall[] = [];
+  readonly earlyEvents: EarlyEvent[] = [];
   replay?: ReplayRecord;
   usageConfirmed = false;
   hasSemanticOutput = false;

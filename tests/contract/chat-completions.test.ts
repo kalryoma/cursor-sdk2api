@@ -342,7 +342,7 @@ test("stream tool_calls are JSON-string arguments on the boundary chunk", async 
 
 test("stream emits each tool_call as it arrives with increasing index and no boundary duplicate", async () => {
   ctx = await startTestApp({
-    config: { toolBatchSettleMs: 5_000 },
+    config: { toolBatchSettleMs: 300 },
     sdk: {
       scripts: [
         [
@@ -383,6 +383,38 @@ test("stream emits each tool_call as it arrives with increasing index and no bou
   expect(frames.indexOf(toolChunks[0]!)).toBeGreaterThan(textIndex);
   expect(finishIndex).toBeGreaterThan(frames.indexOf(toolChunks[1]!));
   expect(choice(frames[finishIndex]!)?.finish_reason).toBe("tool_calls");
+});
+
+test("text after a tool call streams in arrival order and the non-stream body carries the same content", async () => {
+  ctx = await startTestApp({
+    config: { toolBatchSettleMs: 100 },
+    sdk: {
+      scripts: [
+        [
+          { type: "text", chunks: ["Calling"] },
+          { type: "tools", calls: [{ name: "lookup", input: { q: "a" } }], trailingText: [" now"] },
+          { type: "text", chunks: ["later"] },
+        ],
+      ],
+    },
+  });
+  const body = { model: "composer-2.5", messages: [{ role: "user", content: "go" }], tools };
+  const res = await api(ctx, "/v1/chat/completions", { method: "POST", body: JSON.stringify({ ...body, stream: true }) });
+  const frames = parseChatSse(await res.text()).filter(isRecord);
+  const deltas = frames
+    .map((chunk) => (chunk.choices as Array<{ delta?: { content?: string; tool_calls?: unknown[] } }>)?.[0]?.delta)
+    .filter((delta): delta is { content?: string; tool_calls?: unknown[] } => Boolean(delta))
+    .map((delta) => (Array.isArray(delta.tool_calls) ? "tool_calls" : delta.content))
+    .filter((item) => item !== undefined && item !== "");
+  expect(deltas).toEqual(["Calling", "tool_calls", " now"]);
+  const replay = await api(ctx, "/v1/chat/completions", { method: "POST", body: JSON.stringify(body) });
+  const replayed = (await replay.json()) as {
+    choices: Array<{ finish_reason: string; message: { content: string | null; tool_calls?: Array<{ function: { name: string } }> } }>;
+  };
+  expect(replay.status).toBe(200);
+  expect(replayed.choices[0]?.message.content).toBe("Calling now");
+  expect(replayed.choices[0]?.message.tool_calls?.map((call) => call.function.name)).toEqual(["lookup"]);
+  expect(replayed.choices[0]?.finish_reason).toBe("tool_calls");
 });
 
 test("include_usage emits a choices=[] usage chunk before [DONE]", async () => {

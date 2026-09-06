@@ -643,7 +643,7 @@ export class RunCoordinator {
       this.deps.registry.unindexTool(id);
     }
     session.pending.clear();
-    session.earlyCalls.length = 0;
+    session.earlyEvents.length = 0;
     session.lastResultDigest = undefined;
     session.replay = undefined;
     session.appliedBoundaryId = undefined;

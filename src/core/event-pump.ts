@@ -4,7 +4,7 @@ import { messageId } from "../ids.js";
 import type { AnthropicContentBlock, AssistantTurn, ToolUseBlock } from "../protocols/anthropic/types.js";
 import type { SdkDeltaUpdate, SdkRun, SdkStreamEvent } from "../sdk/port.js";
 import { deferredUsage, fromSdkUsage } from "./usage.js";
-import type { PendingCall, Session } from "./session.js";
+import type { EarlyEvent, PendingCall, Session } from "./session.js";
 
 export type PumpBoundary =
   | { type: "tools"; turn: AssistantTurn }
@@ -39,6 +39,30 @@ function toolUseBlock(call: PendingCall): ToolUseBlock {
   };
 }
 
+/**
+ * Content blocks in arrival order: consecutive text or thinking deltas fold
+ * into one block, tool calls stay where the SDK requested them. Streams, the
+ * non-stream body, and replays all derive from this same sequence.
+ */
+export function blocksFromJournal(records: readonly DeltaRecord[]): AnthropicContentBlock[] {
+  const blocks: AnthropicContentBlock[] = [];
+  for (const record of records) {
+    if (record.kind === "tool_use") {
+      blocks.push(record.block);
+      continue;
+    }
+    const last = blocks.at(-1);
+    if (record.kind === "text") {
+      if (last?.type === "text") last.text += record.text;
+      else blocks.push({ type: "text", text: record.text });
+      continue;
+    }
+    if (last?.type === "thinking") last.thinking += record.text;
+    else blocks.push({ type: "thinking", thinking: record.text });
+  }
+  return blocks;
+}
+
 export class EventPump {
   private readonly sinks = new Set<ResponseSink>();
   private openBatch: PendingCall[] = [];
@@ -47,8 +71,6 @@ export class EventPump {
   private finished = false;
   private consumer: Promise<void> | undefined;
   private firstEvent = false;
-  private text = "";
-  private thinking = "";
   private error: unknown;
   /** Current response-segment boundary. All same-segment waiters read this. */
   private publishedBoundary?: PumpBoundary;
@@ -95,8 +117,6 @@ export class EventPump {
     this.error = undefined;
     this.deltaHistory.length = 0;
     this.boundaryWaiters = [];
-    this.text = "";
-    this.thinking = "";
     this.segmentMessageId = messageId();
     this.lastCallAt = undefined;
   }
@@ -144,8 +164,12 @@ export class EventPump {
     });
   }
 
-  ingestEarly(calls: PendingCall[]): void {
-    for (const call of calls) this.notifyTool(call);
+  /** Replay events that arrived before this pump existed, in arrival order. */
+  ingestEarly(events: EarlyEvent[]): void {
+    for (const event of events) {
+      if (event.type === "tool") this.notifyTool(event.call);
+      else this.ingestDelta(event.update);
+    }
   }
 
   ingestDelta(update: SdkDeltaUpdate): void {
@@ -158,16 +182,26 @@ export class EventPump {
     if (!update.text) return;
     this.preferOnDelta = true;
     this.firstEvent = true;
+    this.record(update.type === "thinking-delta" ? "thinking" : "text", update.text);
+  }
+
+  /**
+   * Append one delta to the segment journal and fan it out. Text that trails a
+   * closed tool batch belongs to a response that has already ended; it is
+   * dropped rather than leaking into the next segment.
+   */
+  private record(kind: "text" | "thinking", text: string): void {
+    if (this.publishedBoundary?.type === "tools") return;
     this.session.hasSemanticOutput = true;
-    if (update.type === "thinking-delta") {
-      this.thinking += update.text;
-      this.deltaHistory.push({ kind: "thinking", text: update.text });
-      for (const sink of this.sinks) sink.onThinking?.(update.text);
-      return;
+    this.deltaHistory.push({ kind, text });
+    for (const sink of this.sinks) {
+      if (kind === "thinking") sink.onThinking?.(text);
+      else sink.onText?.(text);
     }
-    this.text += update.text;
-    this.deltaHistory.push({ kind: "text", text: update.text });
-    for (const sink of this.sinks) sink.onText?.(update.text);
+  }
+
+  private journalHas(kind: DeltaRecord["kind"]): boolean {
+    return this.deltaHistory.some((record) => record.kind === kind);
   }
 
   ingestDeltas(updates: SdkDeltaUpdate[]): void {
@@ -197,20 +231,16 @@ export class EventPump {
         this.fail(upstreamError("SDK run cancelled", 499));
         return;
       }
-      const finalText = result.result || this.text;
-      if (!finalText && !this.thinking && !this.session.sawToolBatch) {
+      // Streamed text is what the client already saw, so it stays authoritative;
+      // the SDK's final result only fills in when nothing streamed.
+      if (!this.journalHas("text") && result.result) this.record("text", result.result);
+      const blocks = blocksFromJournal(this.deltaHistory);
+      if (blocks.length === 0) {
         this.fail(emptyTurn());
         return;
       }
       if (!this.session.usageConfirmed) {
         this.session.usageConfirmed = true;
-      }
-      const blocks: AnthropicContentBlock[] = [];
-      if (this.thinking) blocks.push({ type: "thinking", thinking: this.thinking });
-      if (finalText) blocks.push({ type: "text", text: finalText });
-      if (blocks.length === 0) {
-        this.fail(emptyTurn());
-        return;
       }
       this.session.hasSemanticOutput = true;
       this.publish({
@@ -236,19 +266,8 @@ export class EventPump {
     if (this.preferOnDelta && (event.type === "thinking" || event.type === "assistant")) {
       return;
     }
-    if (event.type === "thinking" && event.text) {
-      this.thinking += event.text;
-      this.session.hasSemanticOutput = true;
-      this.deltaHistory.push({ kind: "thinking", text: event.text });
-      for (const sink of this.sinks) sink.onThinking?.(event.text);
-      return;
-    }
-    if (event.type === "assistant" && event.text) {
-      this.text += event.text;
-      this.session.hasSemanticOutput = true;
-      this.deltaHistory.push({ kind: "text", text: event.text });
-      for (const sink of this.sinks) sink.onText?.(event.text);
-    }
+    if (event.type === "thinking" && event.text) this.record("thinking", event.text);
+    else if (event.type === "assistant" && event.text) this.record("text", event.text);
   }
 
   private flushToolBatch(): void {
@@ -259,12 +278,11 @@ export class EventPump {
     this.settleGeneration += 1;
     this.lastBatchClose = { waitedMs: this.clock.now() - (this.lastCallAt ?? this.clock.now()) };
     this.lastCallAt = undefined;
-    const blocks: AnthropicContentBlock[] = [];
-    if (this.thinking) blocks.push({ type: "thinking", thinking: this.thinking });
-    if (this.text) blocks.push({ type: "text", text: this.text });
-    this.thinking = "";
-    this.text = "";
-    for (const call of batch) blocks.push(toolUseBlock(call));
+    const blocks = blocksFromJournal(this.deltaHistory);
+    const journaled = new Set(blocks.filter((block) => block.type === "tool_use").map((block) => block.id));
+    for (const call of batch) {
+      if (!journaled.has(call.toolUseId)) blocks.push(toolUseBlock(call));
+    }
     this.publish({
       type: "tools",
       turn: {
