@@ -168,6 +168,9 @@ function mapDeltaUpdate(raw: unknown): SdkDeltaUpdate | undefined {
   if (update.type === "text-delta" || update.type === "thinking-delta") {
     return { type: update.type, text: String(update.text ?? "") };
   }
+  if (update.type === "token-delta") {
+    return { type: "token-delta", tokens: typeof update.tokens === "number" ? update.tokens : 0 };
+  }
   if (update.type !== "turn-ended") return undefined;
   const usage = mapUsage(update.usage);
   return usage ? { type: "turn-ended", usage } : { type: "turn-ended" };

@@ -36,6 +36,7 @@ export interface SdkRunDriverDeps {
   sdk: SdkRuntime;
   clock: Clock;
   toolBatchSettleMs: number;
+  toolBatchIdleMs?: number;
   firstEventTimeoutMs: number;
 }
 
@@ -84,6 +85,7 @@ export class SdkRunDriver {
       this.deps.toolBatchSettleMs,
       this.deps.firstEventTimeoutMs,
       { startedAt: input.startedAt ?? agentReadyAt, agentReadyAt },
+      this.deps.toolBatchIdleMs ?? 0,
     );
     session.pump = pump;
     pump.ingestEarly(session.earlyEvents.splice(0));

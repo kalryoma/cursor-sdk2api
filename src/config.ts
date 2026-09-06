@@ -40,6 +40,11 @@ export interface GatewayConfig {
   firstEventTimeoutMs: number;
   ordinaryTurnCoordinator: boolean;
   toolBatchSettleMs: number;
+  /**
+   * Close a tool batch once the SDK delta stream has been silent for this long
+   * after the latest callback; 0 disables and TOOL_BATCH_SETTLE_MS stays the cap.
+   */
+  toolBatchIdleMs: number;
   /** SSE keep-alive interval once a stream has started; 0 disables. */
   sseHeartbeatMs: number;
   hostSystemPromptMode: HostSystemPromptMode;
@@ -158,6 +163,7 @@ export function loadConfig(overrides: Partial<GatewayConfig> = {}): GatewayConfi
       envBool("CURSOR_AGENT_TURN_COORDINATOR", true),
     ),
     toolBatchSettleMs: envInt("TOOL_BATCH_SETTLE_MS", 1_500),
+    toolBatchIdleMs: envInt("TOOL_BATCH_IDLE_MS", 0),
     sseHeartbeatMs: envInt("SSE_HEARTBEAT_MS", 15_000),
     hostSystemPromptMode: envHostSystemPromptMode(),
     catalogCacheMs: envInt("CATALOG_CACHE_MS", 5 * 60_000),

@@ -257,6 +257,73 @@ test("round logs carry numeric timings for the batch, the close wait, and the cl
   expect(completed?.tool_count).toBeUndefined();
 });
 
+test("TOOL_BATCH_IDLE_MS closes a batch after SDK silence and is postponed by ongoing deltas", async () => {
+  ctx = await startTestApp({
+    captureLogs: true,
+    config: { toolBatchSettleMs: 3_000, toolBatchIdleMs: 150 },
+    sdk: {
+      scripts: [
+        [
+          {
+            type: "tools",
+            // The second call lands 300 ms later; token deltas every 60 ms keep the 150 ms window open.
+            calls: [
+              { name: "lookup", input: { q: "a" } },
+              { name: "beta", input: { n: 2 }, delayMs: 300 },
+            ],
+            activity: [60, 120, 180, 240],
+          },
+          { type: "text", chunks: ["both"] },
+        ],
+      ],
+    },
+  });
+  const turn = await firstToolTurn(ctx);
+  expect(turn.names).toEqual(["beta", "lookup"]);
+  expect(turn.elapsedMs).toBeLessThan(2_000);
+  const awaiting = logFields(ctx, "awaiting tool results");
+  expect(awaiting?.batch_close).toBe("idle");
+  expect(awaiting?.batch_close_wait_ms).toBeGreaterThanOrEqual(140);
+  expect(awaiting?.tool_count).toBe(2);
+});
+
+test("with TOOL_BATCH_IDLE_MS a silent gap splits the batch and the late call is carried", async () => {
+  ctx = await startTestApp({
+    captureLogs: true,
+    config: { toolBatchSettleMs: 3_000, toolBatchIdleMs: 40 },
+    sdk: {
+      scripts: [
+        [
+          {
+            type: "tools",
+            calls: [
+              { name: "lookup", input: { q: "a" } },
+              { name: "beta", input: { n: 2 }, delayMs: 250 },
+            ],
+          },
+          { type: "text", chunks: ["both"] },
+        ],
+      ],
+    },
+  });
+  const first = await api(ctx, "/v1/messages", {
+    method: "POST",
+    body: JSON.stringify({ model: "composer-2.5", max_tokens: 32, messages: [{ role: "user", content: "do both" }], tools }),
+  });
+  const turn = (await first.json()) as { content: Array<{ type: string; id?: string; name?: string }> };
+  expect(turn.content.filter((block) => block.type === "tool_use").map((block) => block.name)).toEqual(["lookup"]);
+  await new Promise((resolve) => setTimeout(resolve, 350));
+  const carried = await toolResultTurn(ctx, turn.content.find((block) => block.type === "tool_use")?.id ?? "", "ok");
+  const next = (await carried.json()) as { content: Array<{ type: string; name?: string }>; stop_reason: string };
+  expect(next.stop_reason).toBe("tool_use");
+  expect(next.content.map((block) => block.name)).toEqual(["beta"]);
+  const closes = ctx.logs
+    .map((line) => JSON.parse(line) as { fields: Record<string, unknown>; message: string })
+    .filter((entry) => entry.message === "awaiting tool results")
+    .map((entry) => entry.fields.batch_close);
+  expect(closes).toEqual(["idle", "carried"]);
+});
+
 test("the settle timer restarts on each callback so a staggered batch stays whole", async () => {
   ctx = await startTestApp({
     config: { toolBatchSettleMs: 100 },

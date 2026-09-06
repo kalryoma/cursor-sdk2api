@@ -133,6 +133,7 @@ export class RunCoordinator {
       sdk: deps.sdk,
       clock: deps.clock,
       toolBatchSettleMs: deps.config.toolBatchSettleMs,
+      toolBatchIdleMs: deps.config.toolBatchIdleMs,
       firstEventTimeoutMs: deps.config.firstEventTimeoutMs,
     });
     this.deps.ordinaryJournal?.setOnExpire((record) => {
@@ -1160,6 +1161,7 @@ export class RunCoordinator {
               pending_count: session.unresolvedIds().length,
               stop_reason: "tool_use",
               system_prompt_mode: session.systemPromptMode,
+              batch_close: session.pump?.lastBatchClose?.reason,
               ...session.pump?.timingSummary(),
             },
             "awaiting tool results",

@@ -15,8 +15,9 @@ export type DeltaRecord =
   | { kind: "text" | "thinking"; text: string }
   | { kind: "tool_use"; block: ToolUseBlock };
 
-/** How long the batch waited after its last tool callback before closing. */
+/** How the batch closed and how long after its last tool callback. */
 export interface BatchClose {
+  reason: "settle_timer" | "idle" | "carried";
   waitedMs: number;
 }
 
@@ -81,6 +82,7 @@ export class EventPump {
   private readonly sinks = new Set<ResponseSink>();
   private openBatch: PendingCall[] = [];
   private settleGeneration = 0;
+  private idleGeneration = 0;
   private boundaryWaiters: Array<(boundary: PumpBoundary) => void> = [];
   private finished = false;
   private consumer: Promise<void> | undefined;
@@ -113,6 +115,8 @@ export class EventPump {
     private readonly settleMs: number,
     private readonly firstEventTimeoutMs: number,
     timing?: Pick<SegmentTiming, "startedAt" | "agentReadyAt">,
+    /** Close an open batch after this much SDK silence; 0 leaves only the settle timer. */
+    private readonly idleMs = 0,
   ) {
     const now = clock.now();
     this.timing = { startedAt: timing?.startedAt ?? now, agentReadyAt: timing?.agentReadyAt ?? now, toolCount: 0 };
@@ -188,7 +192,7 @@ export class EventPump {
     // The SDK is still waiting on these, so no new generation can interleave:
     // publish them as the whole next batch without waiting on anything.
     this.timing.carriedCount = calls;
-    this.flushToolBatch();
+    this.flushToolBatch("carried");
   }
 
   currentMessageId(): string {
@@ -208,16 +212,33 @@ export class EventPump {
     }
     this.markFirstEvent();
     this.openCall(call);
+    this.armIdleClose();
     const generation = ++this.settleGeneration;
     const flush = () => {
       if (generation !== this.settleGeneration || this.finished) return;
-      this.flushToolBatch();
+      this.flushToolBatch("settle_timer");
     };
     if (this.settleMs <= 0) {
       queueMicrotask(flush);
       return;
     }
     void this.clock.sleep(this.settleMs).then(flush);
+  }
+
+  /**
+   * Optional early close: the model dispatches the calls of one generation
+   * while its delta stream is still active, and goes silent once the last one
+   * is out. Every callback and every delta re-arms the window; the settle
+   * timer remains the cap, and a wrong close is survivable because a later
+   * call is carried into the next batch.
+   */
+  private armIdleClose(): void {
+    if (this.idleMs <= 0 || this.openBatch.length === 0) return;
+    const generation = ++this.idleGeneration;
+    void this.clock.sleep(this.idleMs).then(() => {
+      if (generation !== this.idleGeneration || this.finished || this.openBatch.length === 0) return;
+      this.flushToolBatch("idle");
+    });
   }
 
   waitForBoundary(): Promise<PumpBoundary> {
@@ -238,15 +259,12 @@ export class EventPump {
   }
 
   ingestDelta(update: SdkDeltaUpdate): void {
-    if (update.type === "turn-ended") {
-      // Per-turn usage is diagnostic only. Cumulative usage is confirmed via run.wait().
-      this.markFirstEvent();
-      return;
-    }
-    if (update.type !== "text-delta" && update.type !== "thinking-delta") return;
+    this.markFirstEvent();
+    // Any delta while a batch is open means the model is still generating it.
+    this.armIdleClose();
+    if (update.type === "turn-ended" || update.type === "token-delta") return;
     if (!update.text) return;
     this.preferOnDelta = true;
-    this.markFirstEvent();
     this.record(update.type === "thinking-delta" ? "thinking" : "text", update.text);
   }
 
@@ -361,13 +379,14 @@ export class EventPump {
     else if (event.type === "assistant" && event.text) this.record("text", event.text);
   }
 
-  private flushToolBatch(): void {
+  private flushToolBatch(reason: BatchClose["reason"]): void {
     if (this.openBatch.length === 0 || this.finished) return;
     const batch = this.openBatch;
     this.openBatch = [];
-    // Invalidate any settle timer still pending for this batch.
+    // Invalidate any settle or idle timer still pending for this batch.
     this.settleGeneration += 1;
-    this.lastBatchClose = { waitedMs: this.clock.now() - (this.lastCallAt ?? this.clock.now()) };
+    this.idleGeneration += 1;
+    this.lastBatchClose = { reason, waitedMs: this.clock.now() - (this.lastCallAt ?? this.clock.now()) };
     this.lastCallAt = undefined;
     const blocks = blocksFromJournal(this.deltaHistory);
     const journaled = new Set(blocks.filter((block) => block.type === "tool_use").map((block) => block.id));

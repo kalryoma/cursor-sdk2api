@@ -30,6 +30,8 @@ export type FakeStep =
       trailingText?: string[];
       /** Delay before the trailing text; longer than the settle timer puts it after the batch closed. */
       trailingTextDelayMs?: number;
+      /** Offsets (ms from step start) at which a token-delta shows the model still generating. */
+      activity?: number[];
     }
   | { type: "silent-final"; text: string }
   | { type: "empty" }
@@ -169,6 +171,11 @@ export class FakeRun implements SdkRun {
    */
   private async runToolStep(step: FakeToolStep): Promise<void> {
     const calls = step.calls.map((call) => ({ ...call, id: call.id ?? `sdk_${randomUUID()}` }));
+    const activity = (step.activity ?? []).map((at) =>
+      setTimeout(() => {
+        void this.emitDelta({ type: "token-delta", tokens: 1 });
+      }, at),
+    );
     const results = calls.map((call) =>
       (async () => {
         if (call.delayMs) await new Promise((resolve) => setTimeout(resolve, call.delayMs));
@@ -191,7 +198,11 @@ export class FakeRun implements SdkRun {
       this.streamSnapshots.push(snapshot);
       this.events.push(snapshot);
     }
-    await Promise.all(results);
+    try {
+      await Promise.all(results);
+    } finally {
+      for (const timer of activity) clearTimeout(timer);
+    }
   }
 
   stream(): AsyncIterable<SdkStreamEvent> {

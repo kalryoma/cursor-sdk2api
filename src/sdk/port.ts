@@ -89,6 +89,8 @@ export interface SdkCustomTool {
 export type SdkDeltaUpdate =
   | { type: "text-delta"; text: string }
   | { type: "thinking-delta"; text: string }
+  /** Running token count while the model generates; a liveness signal, no content. */
+  | { type: "token-delta"; tokens: number }
   /** End of the agent turn; arrives after custom-tool results, carries that turn's usage. */
   | { type: "turn-ended"; usage?: SdkUsage };
 
