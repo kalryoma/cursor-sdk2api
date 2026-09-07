@@ -26,22 +26,34 @@ Before, tools land only in `finish()` (`tool_lead=0`, parallel items as one clum
 
 ## Cursor CLI direct-key baseline
 
-Same three models as `live:timing` (`claude-sonnet-4-6`, `grok-4.6`, `composer-2.5`), measured on official Cursor CLI (`agent -p --output-format stream-json --stream-partial-output`) with a User API Key and **no** HTTP gateway. Re-run with `CURSOR_LIVE_SMOKE=1 npm run live:cli-timing`.
+Same three `live:timing` model families, measured on official Cursor CLI (`agent` `2026.09.02-c22c1a3`, `-p --output-format stream-json --stream-partial-output`) with a User API Key and **no** HTTP gateway. Window: 2026-09-07, Node `v22.22.2`, linux x64, 9/9 pass. Re-run with `CURSOR_LIVE_SMOKE=1 npm run live:cli-timing`.
 
-This is the generation/harness floor the gateway numbers sit on. CLI has no Messages / Chat / Responses split, so each model is one CLI path. Tool cases use CLI-native file reads against isolated marker files, not `live_alpha` / `live_beta`. `tool_lead_ms` here is time from the first native tool start to the CLI `result` event; it is **not** the gateway 1.5 s settle.
+CLI catalog slugs are not the gateway ids. The runner maps them and records both:
 
-Receipt fields match `live:timing` where they exist: `first_byte_ms`, `first_tool_ms`, `tool_lead_ms`, `duration_ms`. The machine JSON stays outside git.
+| Gateway / live:timing id | CLI `--model` |
+|---|---|
+| `claude-sonnet-4-6` | `claude-4.6-sonnet-medium` |
+| `grok-4.6` | `cursor-grok-4.6-medium` |
+| `composer-2.5` | `composer-2.5` |
+
+This is the generation/harness floor the gateway numbers sit on. CLI has no Messages / Chat / Responses split. Text uses `--mode ask`. Tool cases use CLI-native file reads against isolated marker files, not `live_alpha` / `live_beta`. `tool_lead_ms` here is first native tool start → CLI `result` (tool exec + follow-up generation). It is **not** the gateway 1.5 s settle. Gateway `live:timing` tool rows stop when the first tool batch is published; they do not run the tools or a second model turn.
+
+Receipt fields match `live:timing` where they exist: `first_byte_ms` (first thinking or assistant delta), `first_tool_ms`, `tool_lead_ms`, `duration_ms`. The machine JSON stays outside git.
 
 | Case | First byte | First tool | Tool lead | Duration | Result |
 |---|---:|---:|---:|---:|---|
-| Sonnet CLI text | — | — | — | — | pending live run |
-| Sonnet CLI single | — | — | — | — | pending live run |
-| Sonnet CLI parallel | — | — | — | — | pending live run |
-| Grok CLI text | — | — | — | — | pending live run |
-| Grok CLI single | — | — | — | — | pending live run |
-| Grok CLI parallel | — | — | — | — | pending live run |
-| Composer CLI text | — | — | — | — | pending live run |
-| Composer CLI single | — | — | — | — | pending live run |
-| Composer CLI parallel | — | — | — | — | pending live run |
+| Sonnet CLI text | 8.58s | — | — | 9.32s | pass |
+| Sonnet CLI single | 19.00s | 11.23s | **7914 ms** | 19.35s | pass |
+| Sonnet CLI parallel | 16.66s | 9.37s | **7363 ms** | 16.90s | pass |
+| Grok CLI text | 9.81s | — | — | 10.07s | pass |
+| Grok CLI single | 9.30s | 10.51s | **7178 ms** | 17.86s | pass |
+| Grok CLI parallel | 10.48s | 11.97s | **15824 ms** | 28.07s | pass |
+| Composer CLI text | 9.19s | — | — | 9.41s | pass |
+| Composer CLI single | 8.14s | 8.14s | **6972 ms** | 15.30s | pass |
+| Composer CLI parallel | 8.24s | 8.24s | **10836 ms** | 19.25s | pass |
+
+Sonnet tool turns streamed the file `read` before any thinking/text (`first_tool` < `first_byte`). Composer started both in the same ~10 ms window. Grok parallel selected two `read`s and also `glob` / `getMcpTools` (spread 8.66 s); treat that extra tool work as model-nondeterministic, not a CLI scheduler claim.
+
+Text is the only same-shaped comparison: one generation, no tools. CLI first byte was 8.6–9.8 s and wall clock 9.3–10.1 s across the three families. Do not subtract the gateway 1.5 s settle from these CLI tool durations; the CLI paid a full agent turn.
 
 Chat and Responses rows in the gateway table have no CLI counterpart.

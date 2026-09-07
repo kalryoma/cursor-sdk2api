@@ -25,11 +25,12 @@ built checkout so the same runner can A/B two gateway revisions.
 
 `live:cli-timing` is the same three default models (`claude-sonnet-4-6`,
 `grok-4.6`, `composer-2.5`) on official Cursor CLI (`agent -p`,
-`CURSOR_API_KEY`). It does not start this gateway. Text uses `--mode ask`.
-Tool cases read isolated marker files through CLI-native tools, not
-`live_alpha` / `live_beta`. Requires the `agent` binary on `PATH` or
-`CURSOR_CLI_BIN`. Receipts stay in a temp file unless `LIVE_SMOKE_OUTPUT`
-is set. The published comparison lives in
+`CURSOR_API_KEY`). It does not start this gateway. CLI catalog slugs are
+mapped (`claude-4.6-sonnet-medium`, `cursor-grok-4.6-medium`,
+`composer-2.5`). Text uses `--mode ask`. Tool cases read isolated marker
+files through CLI-native tools, not `live_alpha` / `live_beta`. Requires
+the `agent` binary on `PATH` or `CURSOR_CLI_BIN`. Receipts stay in a temp
+file unless `LIVE_SMOKE_OUTPUT` is set. The published comparison lives in
 [`docs/evidence/pr-performance-diff.md`](../../docs/evidence/pr-performance-diff.md).
 
 Optional:

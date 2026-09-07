@@ -4,7 +4,7 @@
  * official `agent` binary, no HTTP gateway. Stdout and the receipt hold
  * timings and event names only; no prompt, tool payload, or credential.
  */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -45,6 +45,12 @@ const token = () => `tok-${randomBytes(4).toString("hex")}`;
 
 export function resolveCliBin(env: NodeJS.ProcessEnv): string {
   return env.CURSOR_CLI_BIN?.trim() || "agent";
+}
+
+function cliVersion(bin: string): string | undefined {
+  const result = spawnSync(bin, ["--version"], { encoding: "utf8", timeout: 15_000 });
+  const version = result.stdout.trim();
+  return version || undefined;
 }
 
 function toolCase(
@@ -306,6 +312,7 @@ async function main(): Promise<void> {
         arch: process.arch,
         runner: "tests/live-smoke/cli-timing",
         cli_bin: bin,
+        cli_version: cliVersion(bin),
       },
       cases,
     };
