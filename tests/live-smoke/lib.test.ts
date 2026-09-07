@@ -256,6 +256,9 @@ test("CLI stream-json marks keep timings and tool names, not prompt or file bodi
       '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hidden-prompt"}]}}',
     ),
     parseCliLine(
+      '{"type":"thinking","subtype":"delta","timestamp_ms":1}',
+    ),
+    parseCliLine(
       '{"type":"assistant","timestamp_ms":1,"message":{"role":"assistant","content":[{"type":"text","text":"hidden-delta"}]}}',
     ),
     parseCliLine(
@@ -272,14 +275,14 @@ test("CLI stream-json marks keep timings and tool names, not prompt or file bodi
     ),
     parseCliLine('{"type":"result","subtype":"success","duration_ms":1234,"is_error":false,"result":"hidden-final"}'),
   ];
-  const clocks = [0, 5, 10, 20, 40, 50, 80, 90];
+  const clocks = [0, 5, 8, 10, 20, 40, 50, 80, 90];
   events.forEach((event, index) => {
     expect(event).toBeDefined();
     classifyCliEvent(event!, marks, clocks[index]!);
   });
   expect(marks).toEqual({
     model: "Claude 4 Sonnet",
-    first_byte_ms: 10,
+    first_byte_ms: 8,
     tool_items: [
       { name: "read", at_ms: 40 },
       { name: "live_beta", at_ms: 80 },

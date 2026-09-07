@@ -50,6 +50,10 @@ export function classifyCliEvent(event: Record<string, unknown>, marks: CliMarks
     marks.model = event.model;
     return;
   }
+  if (type === "thinking" && event.subtype === "delta") {
+    marks.first_byte_ms ??= now;
+    return;
+  }
   if (isAssistantFirstByte(event)) {
     marks.first_byte_ms ??= now;
     return;
