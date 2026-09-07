@@ -38,6 +38,10 @@ CLI catalog slugs are not the gateway ids. The runner maps them and records both
 
 This is the generation/harness floor the gateway numbers sit on. CLI has no Messages / Chat / Responses split. Text uses `--mode ask`. Tool cases use CLI-native file reads against isolated marker files, not `live_alpha` / `live_beta`. `tool_lead_ms` here is first native tool start → CLI `result` (tool exec + follow-up generation). It is **not** the gateway 1.5 s settle. Gateway `live:timing` tool rows stop when the first tool batch is published; they do not run the tools or a second model turn.
 
+![This repo as a harness vs raw Cursor CLI: time to first tool and wall-clock on Sonnet, Grok, and Composer](../assets/gateway-vs-cli-timing.svg)
+
+**How to read the chart.** Orange is this gateway on Claude Code / Codex / OpenAI-shaped clients. Black is official Cursor CLI with the same User API Key and no HTTP proxy. The top panel is the comparable mark: seconds to the first tool item. × CLI is CLI ÷ gateway on that panel (Grok single first tool is 3.7× the gateway). The bottom panel is wall-clock to stop and is **different work**: the gateway publishes the tool batch and waits 1.5 s; the CLI executes a native `read` and finishes a second generation. The peach chips are CLI text-only (8.6–9.8 s to first byte). The gateway table has no text row, so those chips are not a vs.
+
 Receipt fields match `live:timing` where they exist: `first_byte_ms` (first thinking or assistant delta), `first_tool_ms`, `tool_lead_ms`, `duration_ms`. The machine JSON stays outside git.
 
 | Case | First byte | First tool | Tool lead | Duration | Result |
