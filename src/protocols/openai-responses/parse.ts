@@ -221,6 +221,14 @@ function splitResponsesTools(
       if (type === "x_search" || type === "file_search" || type === "computer" || type === "shell" || type === "apply_patch") {
         assertHostedSearchRequest(tool as Record<string, unknown>, mode);
       }
+      if (type === "namespace") {
+        const raw = tool as Record<string, unknown>;
+        // Codex 0.153+ sends grouping namespaces at the top-level tools array.
+        // An empty/missing child list is a no-op group, not a hosted tool.
+        if (!Array.isArray(raw.tools) || raw.tools.length === 0) continue;
+        functions.push(...parseNamespaceTools(raw));
+        continue;
+      }
     }
     functions.push(parseResponsesTool(tool));
   }

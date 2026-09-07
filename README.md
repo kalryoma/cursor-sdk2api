@@ -90,8 +90,12 @@ api_backend = "responses"
 ### Codex
 
 ```toml
-model = "composer-2.5"
+model = "claude-sonnet-5"
 model_provider = "cursor-sdk2api"
+model_reasoning_effort = "low"
+# Codex 0.153+ injects hosted web_search by default. Keep it disabled unless
+# the gateway is started with HOSTED_SEARCH_MODE=auto.
+web_search = "disabled"
 
 [model_providers.cursor-sdk2api]
 name = "cursor-sdk2api"
@@ -100,7 +104,7 @@ wire_api = "responses"
 env_key = "GATEWAY_ACCESS_KEY"
 ```
 
-Responses clients that require `previous_response_id`, stored response objects, or hosted OpenAI tools are not supported yet.
+Responses clients that require `previous_response_id`, stored response objects, or hosted OpenAI tools (`file_search`, `computer`, `shell`, `apply_patch`) are not supported yet. Top-level Codex `namespace` tools flatten to client functions.
 
 ## Tools and search
 

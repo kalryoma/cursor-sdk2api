@@ -72,6 +72,37 @@ test("additional_tools function entries join the executable client tool catalog"
   expect(ctx.sdk.lastCreate?.clientToolNames).toEqual(["lookup"]);
 });
 
+test("top-level Codex namespace tools qualify like additional_tools", () => {
+  const parsed = parseResponsesRequest({
+    model: "composer-2.5",
+    tools: [
+      functionTool,
+      {
+        type: "namespace",
+        name: "multi_agent_v1",
+        description: "Tools for spawning and managing sub-agents.",
+        tools: [{
+          type: "function",
+          name: "spawn_agent",
+          description: "Spawn a sub-agent",
+          parameters: { type: "object", properties: { prompt: { type: "string" } } },
+        }],
+      },
+      { type: "namespace", name: "collaboration" },
+    ],
+    input: "hello",
+  });
+  expect(parsed.parsed.tools.map((tool) => tool.sdk_name ?? tool.name)).toEqual([
+    "lookup",
+    "multi_agent_v1__spawn_agent",
+  ]);
+  expect(parsed.parsed.tools[1]).toMatchObject({
+    name: "spawn_agent",
+    namespace: "multi_agent_v1",
+    sdk_name: "multi_agent_v1__spawn_agent",
+  });
+});
+
 test("identical top-level and additional function tools dedupe", () => {
   const parsed = parseResponsesRequest({
     model: "composer-2.5",
