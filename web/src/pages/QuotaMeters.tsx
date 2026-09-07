@@ -1,9 +1,10 @@
 import {
   cursorUsedPercent,
+  formatCursorReset,
+  formatGrokBotReset,
   formatPercent,
   formatQuota,
   formatQuotaBreakdown,
-  formatResetAt,
   grokBotRemainingPercent,
   grokBotUsedPercent,
 } from "../quota";
@@ -29,12 +30,16 @@ export function QuotaPair({
   const cursorUsed = cursorUsedPercent(account);
   const grokUsed = grokBotUsedPercent(account);
   const grokRemaining = grokBotRemainingPercent(account);
-  const cursorDetail = [formatQuota(account), formatQuotaBreakdown(account)].filter(Boolean).join(" · ");
+  const cursorDetail = [
+    formatQuota(account),
+    formatQuotaBreakdown(account),
+    formatCursorReset(account, resetPrefix),
+  ].filter(Boolean).join(" · ");
   const plan = typeof account?.grok_bot?.plan_label === "string" ? account.grok_bot.plan_label.trim() : "";
   const grokDetail = [
     grokRemaining !== undefined ? remainingPrefix.replace("{n}", formatPercent(grokRemaining)) : "",
     plan,
-    formatResetAt(account?.grok_bot?.next_reset_timestamp_utc, resetPrefix),
+    formatGrokBotReset(account, resetPrefix),
   ].filter(Boolean).join(" · ");
 
   return (

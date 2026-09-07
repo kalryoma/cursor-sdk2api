@@ -50,6 +50,7 @@ export interface AccountPayload {
     remaining_percent?: unknown;
     plan_label?: unknown;
     next_reset_timestamp_utc?: unknown;
+    current_period_start?: unknown;
     reason?: unknown;
   };
   runtime?: {

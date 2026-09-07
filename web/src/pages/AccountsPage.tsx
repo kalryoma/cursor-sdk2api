@@ -66,6 +66,7 @@ export function AccountsPage({
           quotaMissing={t.quotaMissing}
           grokBotQuota={t.grokBotQuota}
           grokBotMissing={t.grokBotMissing}
+          resetPrefix={t.resetPrefix}
           fableOn={t.fableOn}
           fableOff={t.fableOff}
           fableUnknown={t.fableUnknown}
