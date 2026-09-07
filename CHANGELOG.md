@@ -13,6 +13,7 @@
 
 ## Unreleased
 
+- Console shows each API key's next Cursor period reset and Grok Bot weekly reset as a local date and time on Quota, Accounts, and account detail.
 - `/v1/responses` accepts Codex CLI 0.153+ top-level `type: "namespace"` tools the same way as `additional_tools` children. Empty grouping namespaces are ignored; hosted `web_search` still requires `HOSTED_SEARCH_MODE=auto`.
 - Document OpenCodex as an `openai-responses` sidecar in front of this gateway.
 - Tool items stream when the SDK requests the tool; stream, non-stream body, replay, and `response.completed.output` share one ordered journal, including events that fire before `send()` resolves. Only the stop reason waits for the batch to close.

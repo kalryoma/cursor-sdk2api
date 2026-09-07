@@ -62,6 +62,19 @@ test("quota pair stacks at 390px without a wider min-width", () => {
   expect(css).not.toMatch(/\.quota-meter[^{]*\{[^}]*min-width:\s*(?:3(?:9[1-9]|[0-9]{2,})|[4-9]\d{2,})px/);
 });
 
+test("quota meters render next reset date and time for Cursor and Grok Bot", () => {
+  const meters = readFileSync(join(repoRoot, "web/src/pages/QuotaMeters.tsx"), "utf8");
+  const table = readFileSync(join(repoRoot, "web/src/pages/AccountTable.tsx"), "utf8");
+  const quota = readFileSync(join(repoRoot, "web/src/quota.ts"), "utf8");
+  expect(quota).toContain("timeStyle: \"short\"");
+  expect(quota).toContain("billing_cycle_end");
+  expect(quota).toContain("next_reset_timestamp_utc");
+  expect(meters).toContain("formatCursorReset");
+  expect(meters).toContain("formatGrokBotReset");
+  expect(table).toContain("formatCursorReset");
+  expect(table).toContain("formatGrokBotReset");
+});
+
 test("console copy names Cursor quota and Grok Bot quota without internal terms", () => {
   const app = readFileSync(join(repoRoot, "web/src/App.tsx"), "utf8");
   expect(app).toContain("Cursor quota");

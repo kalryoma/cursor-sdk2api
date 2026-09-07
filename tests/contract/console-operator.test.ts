@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { catalogHasFable5, modelLooksLikeFable5 } from "../../web/src/fable5.js";
-import { formatGrokBotQuota, formatQuota, formatQuotaBreakdown, cursorUsedPercent, grokBotUsedPercent, sandSelectable } from "../../web/src/quota.js";
+import { formatCursorReset, formatGrokBotQuota, formatGrokBotReset, formatQuota, formatQuotaBreakdown, formatResetAt, parseResetDate, cursorUsedPercent, grokBotUsedPercent, sandSelectable } from "../../web/src/quota.js";
 import { maskKey } from "../../web/src/accounts.js";
 import { RECIPE_ORDER } from "../../web/src/recipes.js";
 
@@ -97,6 +97,28 @@ test("quota helpers keep Cursor period percent distinct from Grok Bot weekly per
   expect(sandSelectable(account, true)).toBe(true);
   expect(sandSelectable(account, false)).toBe(false);
   expect(sandSelectable({ ...account, grok_bot: { available: false, reason: "sand_access_not_granted" } }, true)).toBe(false);
+});
+
+test("reset formatter shows date and time for ISO and epoch-ms quota fields", () => {
+  const iso = "2026-09-01T10:11:15.817Z";
+  const epochMs = "1789198659000";
+  expect(parseResetDate(iso)?.toISOString()).toBe(iso);
+  expect(parseResetDate(epochMs)?.getTime()).toBe(1_789_198_659_000);
+  expect(parseResetDate(1_789_198_659)).toEqual(parseResetDate(epochMs));
+  expect(formatResetAt(iso, "Resets")).toMatch(/^Resets /);
+  expect(formatResetAt(iso, "Resets")).not.toBe(`Resets ${new Date(iso).toLocaleDateString()}`);
+  expect(formatResetAt("", "Resets")).toBe("");
+  expect(formatResetAt("not-a-date", "Resets")).toBe("");
+
+  const account = {
+    status: "ok" as const,
+    identity: { api_key_name: "local-dev" },
+    limits: { billing_cycle_end: epochMs },
+    grok_bot: { available: true, next_reset_timestamp_utc: iso },
+    capabilities: { identity: true, spending: true, limits: true, grok_bot: true },
+  };
+  expect(formatCursorReset(account, "Resets")).toMatch(/^Resets /);
+  expect(formatGrokBotReset(account, "重置")).toMatch(/^重置 /);
 });
 
 test("key mask keeps the edges and hides the middle", () => {

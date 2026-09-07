@@ -67,11 +67,34 @@ export function formatGrokBotQuota(account?: AccountPayload): string {
   return plan ? `${formatPercent(used)} · ${plan}` : formatPercent(used);
 }
 
+export function parseResetDate(value: unknown): Date | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return fromEpoch(value);
+  if (typeof value !== "string") return undefined;
+  const text = value.trim();
+  if (!text) return undefined;
+  if (/^\d+$/.test(text)) return fromEpoch(Number(text));
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
+function fromEpoch(value: number): Date | undefined {
+  const ms = value > 1e12 ? value : value > 1e9 ? value * 1000 : Number.NaN;
+  const date = new Date(ms);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
 export function formatResetAt(value: unknown, prefix: string): string {
-  if (typeof value !== "string" || !value.trim()) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return `${prefix} ${date.toLocaleDateString()}`;
+  const date = parseResetDate(value);
+  if (!date) return "";
+  return `${prefix} ${date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}`;
+}
+
+export function formatCursorReset(account: AccountPayload | undefined, prefix: string): string {
+  return formatResetAt(account?.limits?.billing_cycle_end, prefix);
+}
+
+export function formatGrokBotReset(account: AccountPayload | undefined, prefix: string): string {
+  return formatResetAt(account?.grok_bot?.next_reset_timestamp_utc, prefix);
 }
 
 export function formatPercent(value: number): string {
