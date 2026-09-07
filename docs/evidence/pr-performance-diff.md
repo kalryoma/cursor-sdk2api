@@ -38,9 +38,31 @@ CLI catalog slugs are not the gateway ids. The runner maps them and records both
 
 This is the generation/harness floor the gateway numbers sit on. CLI has no Messages / Chat / Responses split. Text uses `--mode ask`. Tool cases use CLI-native file reads against isolated marker files, not `live_alpha` / `live_beta`. `tool_lead_ms` here is first native tool start → CLI `result` (tool exec + follow-up generation). It is **not** the gateway 1.5 s settle. Gateway `live:timing` tool rows stop when the first tool batch is published; they do not run the tools or a second model turn.
 
-![This repo as a harness vs raw Cursor CLI: time to first tool and wall-clock on Sonnet, Grok, and Composer](../assets/gateway-vs-cli-timing.svg)
+![Earlier tool-batch gateway rows vs full-turn Cursor CLI — not the same work](../assets/gateway-vs-cli-timing.svg)
 
-**How to read the chart.** Orange is this gateway on Claude Code / Codex / OpenAI-shaped clients. Black is official Cursor CLI with the same User API Key and no HTTP proxy. The top panel is the comparable mark: seconds to the first tool item. × CLI is CLI ÷ gateway on that panel (Grok single first tool is 3.7× the gateway). The bottom panel is wall-clock to stop and is **different work**: the gateway publishes the tool batch and waits 1.5 s; the CLI executes a native `read` and finishes a second generation. The peach chips are CLI text-only (8.6–9.8 s to first byte). The gateway table has no text row, so those chips are not a vs.
+**Do not use this chart as “proxy vs native.”** Orange here is `live:timing` stopping at the first tool batch plus the 1.5 s settle. Black is a finished Cursor CLI agent turn. The proxy is an extra HTTP layer; it cannot be faster at the same work because of that chart. The peach chips are CLI text-only and have no gateway text row. Use the same-work section below.
+
+## Same-work harness protocol vs Cursor CLI
+
+Orange **is** this repo’s proxy speaking the harness wire protocol (not a spawned Claude Code / Codex / Grok Build binary). Black **is** official Cursor CLI (`agent`) with the User API Key and no HTTP proxy.
+
+| Pair | Proxy path | Proxy model | CLI model | Fast |
+|---|---|---|---|---|
+| Sonnet 4.6 | Claude Code `POST /v1/messages` | `claude-sonnet-4-6` | `claude-4.6-sonnet-medium` | not advertised on either catalog; CLI `[fast=true]` exits 1 |
+| GPT-5.6 Luna | Codex `POST /v1/responses` | `gpt-5.6-luna` + `fast=true` | `gpt-5.6-luna-high-fast` | both |
+| Grok 4.6 | Grok Build `POST /v1/responses` | `grok-4.6` + `fast=true` | `cursor-grok-4.6-high-fast` | both |
+
+Same user turn: stream a text PONG to stop. No tools. Gateway process already listening; each CLI case spawns `agent`. Re-run with `CURSOR_LIVE_SMOKE=1 npm run live:harness-vs-cli`. Window: 2026-09-07, 6/6 pass.
+
+![Same-work text PONG: harness protocol through this proxy vs raw Cursor CLI](../assets/harness-vs-cli-same-work.svg)
+
+| Pair | Proxy first byte | CLI first byte | Proxy duration | CLI duration | After first byte |
+|---|---:|---:|---:|---:|---|
+| Sonnet 4.6 | 5.20s | 8.21s | 5.33s | 8.53s | 0.13s vs 0.32s |
+| Luna fast | 1.25s | 7.57s | 1.46s | 7.91s | 0.21s vs 0.34s |
+| Grok 4.6 fast | 1.38s | 10.14s | 1.51s | 10.38s | 0.13s vs 0.24s |
+
+The proxy is not beating the model. After the first semantic byte both sides finish in 0.13–0.34 s. CLI’s extra 3–9 s is `agent` startup (sandbox, stream-json, system init) on every spawn. The gateway paid that once when the child process came up. A Claude Code / Codex / Grok Build **binary** pointed at this proxy would add its own startup on top of the orange bars.
 
 Receipt fields match `live:timing` where they exist: `first_byte_ms` (first thinking or assistant delta), `first_tool_ms`, `tool_lead_ms`, `duration_ms`. The machine JSON stays outside git.
 

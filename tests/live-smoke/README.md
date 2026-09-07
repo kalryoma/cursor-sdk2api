@@ -33,6 +33,11 @@ the `agent` binary on `PATH` or `CURSOR_CLI_BIN`. Receipts stay in a temp
 file unless `LIVE_SMOKE_OUTPUT` is set. The published comparison lives in
 [`docs/evidence/pr-performance-diff.md`](../../docs/evidence/pr-performance-diff.md).
 
+`live:harness-vs-cli` is the same-work text PONG: Claude Code Messages,
+Codex Responses, and Grok Build Responses through this gateway versus
+official Cursor CLI. Fast is requested on both sides when the catalog
+exposes it. Do not compare its durations to `live:timing` tool rows.
+
 Optional:
 
 - `GATEWAY_BASE_URL` — attach to an already running gateway instead of spawning `dist/index.js` on `127.0.0.1`. Restart cases are `not_run` and the process exits `2` (incomplete), not green.

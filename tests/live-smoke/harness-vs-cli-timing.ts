@@ -315,11 +315,8 @@ async function main(): Promise<void> {
 
     for (const pair of PAIRS) {
       const gatewayModel = pickCatalogId(pair.gatewayModels, catalogIds);
-      const cliFast = pair.cliFastModels.find((id) => cliIds.includes(id.replace(/\[.*$/, "")));
+      const cliListedFast = pair.cliFastModels.find((id) => cliIds.includes(id));
       const cliPlain = pair.cliModels.find((id) => cliIds.includes(id));
-      const cliModel = cliIds.includes(pair.cliFastModels[0] ?? "")
-        ? pair.cliFastModels[0]
-        : cliFast ?? (pair.cliFastModels[0] && pair.cliFastModels[0].includes("[") ? pair.cliFastModels[0] : cliPlain);
 
       const gateway = gatewayModel
         ? await runGateway({
@@ -331,9 +328,13 @@ async function main(): Promise<void> {
             timeoutMs,
           })
         : { side: "gateway" as const, status: "catalog_missing" as const, fast: false };
-      const cli = cliModel
-        ? await runCli({ bin, model: cliModel, timeoutMs, canaries })
-        : { side: "cli" as const, status: "catalog_missing" as const, fast: false };
+      let cli: SideResult = { side: "cli", status: "catalog_missing", fast: false };
+      if (cliListedFast) {
+        cli = await runCli({ bin, model: cliListedFast, timeoutMs, canaries });
+      } else if (cliPlain) {
+        cli = await runCli({ bin, model: cliPlain, timeoutMs, canaries });
+        cli.fast = false;
+      }
       pairs.push({ id: pair.id, harness: pair.harness, protocol: pair.protocol, gateway, cli });
       for (const side of [gateway, cli]) {
         console.log(
