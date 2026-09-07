@@ -24,6 +24,13 @@ import {
   toolNameFromCall,
   type CliMarks,
 } from "./lib/cli-stream.js";
+import {
+  classifyHarnessEvent,
+  isSemanticDelta,
+  parseSseChunk,
+  pickCatalogId,
+  type HarnessMarks,
+} from "./lib/harness-stream.js";
 import { assertNoCanary, receiptContainsCanary, redactSecrets, redactValue } from "./lib/redact.js";
 import {
   containsOpaqueMarker,
@@ -326,4 +333,25 @@ test("CLI catalog maps live:timing model ids onto Cursor CLI slugs", () => {
     how: "exact",
   });
   expect(resolveCliModel("claude-fable-5", listed).how).toBe("missing");
+});
+
+test("harness SSE marks first semantic delta, not message_start", () => {
+  const marks: HarnessMarks = {};
+  const start = parseSseChunk('event: message_start\ndata: {"type":"message_start"}');
+  const think = parseSseChunk(
+    'event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"hidden"}}',
+  );
+  const stop = parseSseChunk(
+    'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}',
+  );
+  expect(isSemanticDelta("messages", start)).toBe(false);
+  expect(isSemanticDelta("messages", think)).toBe(true);
+  classifyHarnessEvent("messages", start, marks, 5);
+  classifyHarnessEvent("messages", think, marks, 40);
+  classifyHarnessEvent("messages", stop, marks, 90);
+  expect(marks).toEqual({ first_byte_ms: 40, stop_ms: 90, stop_reason: "end_turn" });
+  expect(JSON.stringify(marks)).not.toContain("hidden");
+  expect(isSemanticDelta("responses", parseSseChunk('data: {"type":"response.output_text.delta"}'))).toBe(true);
+  expect(pickCatalogId(["gpt-5.6-luna-high", "gpt-5.6-luna"], ["gpt-5.6-luna", "grok-4.6"])).toBe("gpt-5.6-luna");
+  expect(pickCatalogId(["claude-sonnet-4-6"], ["composer-2.5"])).toBeUndefined();
 });
