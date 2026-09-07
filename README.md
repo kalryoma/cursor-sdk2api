@@ -90,8 +90,12 @@ api_backend = "responses"
 ### Codex
 
 ```toml
-model = "composer-2.5"
+model = "claude-sonnet-5"
 model_provider = "cursor-sdk2api"
+model_reasoning_effort = "low"
+# Codex 0.153+ injects hosted web_search by default. Keep it disabled unless
+# the gateway is started with HOSTED_SEARCH_MODE=auto.
+web_search = "disabled"
 
 [model_providers.cursor-sdk2api]
 name = "cursor-sdk2api"
@@ -100,7 +104,14 @@ wire_api = "responses"
 env_key = "GATEWAY_ACCESS_KEY"
 ```
 
-Responses clients that require `previous_response_id`, stored response objects, or hosted OpenAI tools are not supported yet.
+To run Codex through [OpenCodex](https://opencodex.me/) instead of talking to
+this gateway directly, add a key-auth `openai-responses` provider whose
+`baseUrl` is `http://127.0.0.1:8080/v1`. Do not use OpenCodex's experimental
+`cursor` adapter. Full recipe: [OpenCodex integration](docs/OPENCODEX_INTEGRATION.md).
+
+Default Codex 0.153 sends top-level `namespace` tools (accepted) and hosted `web_search` (fail-closed unless `HOSTED_SEARCH_MODE=auto`). Live catalog resolves `claude-sonnet-5`; low-effort ping ~3.6 s; local `exec_command` continuation works. Codex may warn it has no built-in metadata for that model id.
+
+Responses clients that require `previous_response_id`, stored response objects, or hosted OpenAI tools (`file_search`, `computer`, `shell`, `apply_patch`) are not supported yet. Top-level Codex `namespace` tools flatten to client functions.
 
 ## Tools and search
 

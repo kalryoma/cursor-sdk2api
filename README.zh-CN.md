@@ -91,8 +91,11 @@ api_backend = "responses"
 ### Codex
 
 ```toml
-model = "composer-2.5"
+model = "claude-sonnet-5"
 model_provider = "cursor-sdk2api"
+model_reasoning_effort = "low"
+# Codex 0.153+ 默认会注入托管 web_search。除非网关开启 HOSTED_SEARCH_MODE=auto，否则保持关闭。
+web_search = "disabled"
 
 [model_providers.cursor-sdk2api]
 name = "cursor-sdk2api"
@@ -101,7 +104,11 @@ wire_api = "responses"
 env_key = "GATEWAY_ACCESS_KEY"
 ```
 
-目前不支持强制依赖 `previous_response_id`、远端 response store 或 OpenAI 托管工具的 Responses 客户端。
+如果让 Codex 走 [OpenCodex](https://opencodex.me/) 而不是直连本网关，请添加 `authMode=key` 的 `openai-responses` 供应商，`baseUrl` 为 `http://127.0.0.1:8080/v1`。不要使用 OpenCodex 实验性的 `cursor` adapter。完整步骤见 [OpenCodex integration](docs/OPENCODEX_INTEGRATION.md)。
+
+默认 Codex 0.153 会发送顶层 `namespace` 工具（已接受）以及托管 `web_search`（除非 `HOSTED_SEARCH_MODE=auto`，否则 fail-closed）。目录可解析 `claude-sonnet-5`；low-effort ping 约 3.6 s；本机 `exec_command` 续跑可用。Codex 可能提示该模型 id 没有内置元数据。
+
+目前不支持强制依赖 `previous_response_id`、远端 response store 或 OpenAI 托管工具（`file_search`、`computer`、`shell`、`apply_patch`）的 Responses 客户端。Codex 顶层 `namespace` 工具会展开为客户端 function。
 
 ## 工具与搜索
 

@@ -19,6 +19,8 @@ npm run live:timing     # where a tool round spends its time
 round timings. It forwards `TOOL_BATCH_SETTLE_MS`, `TOOL_BATCH_IDLE_MS`,
 `HOST_SYSTEM_PROMPT_MODE`, and `SSE_HEARTBEAT_MS`. `LIVE_TIMING_PROTOCOL_MODEL`
 picks the Chat/Responses model (default: the first requested model).
+`LIVE_TIMING_REPO_ROOT` / `LIVE_TIMING_ENTRY` point the spawned child at another
+built checkout so the same runner can A/B two gateway revisions.
 
 Optional:
 

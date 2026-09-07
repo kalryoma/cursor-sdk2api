@@ -186,7 +186,8 @@ async function main(): Promise<void> {
     .filter(Boolean);
   const protocolModel = process.env.LIVE_TIMING_PROTOCOL_MODEL?.trim() || models[0] || "claude-sonnet-4-6";
   const output = process.env.LIVE_SMOKE_OUTPUT?.trim() || join(tmpdir(), `cursor-sdk2api-live-timing-${Date.now()}.json`);
-  const distEntry = join(repoRoot, "dist", "index.js");
+  const spawnRoot = process.env.LIVE_TIMING_REPO_ROOT?.trim() || repoRoot;
+  const distEntry = process.env.LIVE_TIMING_ENTRY?.trim() || join(spawnRoot, "dist", "index.js");
   if (!existsSync(distEntry)) {
     console.error("dist/index.js is missing. Run npm run build before live:timing.");
     process.exit(3);
@@ -197,7 +198,7 @@ async function main(): Promise<void> {
 
   const logs: GatewayLog[] = [];
   const child = await startChildGateway({
-    repoRoot,
+    repoRoot: spawnRoot,
     distEntry,
     canaries,
     env: passThrough,
@@ -323,7 +324,13 @@ async function main(): Promise<void> {
     const receipt = {
       schema: "cursor-sdk2api.live-timing.v1",
       ok: cases.every((item) => item.status === "pass" || item.status === "catalog_missing"),
-      environment: { node: process.version, runner: "tests/live-smoke/timing", gateway_env: passThrough },
+      environment: {
+        node: process.version,
+        runner: "tests/live-smoke/timing",
+        gateway_env: passThrough,
+        spawn_repo_root: spawnRoot,
+        spawn_entry: distEntry,
+      },
       cases,
     };
     const serialized = `${JSON.stringify(receipt, null, 2)}\n`;
