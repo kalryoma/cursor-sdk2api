@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 920" width="1080" height="920" role="img" aria-labelledby="title desc">
+  <title id="title">Grok 4.6 PR #2 E2E: three proxy harnesses vs raw Cursor CLI</title>
+  <desc id="desc">Same model and same summary-report task. n=10, drop min/max, mean of 8. Orange is this gateway. Black is agent with no HTTP proxy.</desc>
+  <rect width="1080" height="920" fill="#fffdfb"/>
+  <rect x="0" y="0" width="8" height="920" fill="#ff6a33"/>
+  <text x="36" y="32" fill="#111417" font-size="22" font-weight="750" font-family="ui-sans-serif, system-ui, sans-serif">Grok 4.6 PR #2 E2E: three proxy harnesses vs raw Cursor CLI</text>
+  <text x="36" y="54" fill="#6b6560" font-size="13" font-family="ui-sans-serif, system-ui, sans-serif">Same model and same summary-report task. n=10, drop min/max, mean of 8. Orange is this gateway. Black is agent with no HTTP proxy.</text>
+  <g font-family="ui-sans-serif, system-ui, sans-serif">
+    <rect x="36" y="68" width="14" height="14" rx="3" fill="#ff6a33"/>
+    <text x="56" y="80" fill="#111417" font-size="13">Proxy API (Claude Code / Codex / Grok Build)</text>
+    <rect x="500" y="68" width="14" height="14" rx="3" fill="#111417"/>
+    <text x="520" y="80" fill="#111417" font-size="13">Raw Cursor CLI</text>
+    <rect x="36" y="90" width="1008" height="22" rx="6" fill="#fff4ee"/>
+    <text x="48" y="106" fill="#6b6560" font-size="12">Codex and Grok Build both POST /v1/responses + fast. Claude Code POSTs /v1/messages + fast. CLI is cursor-grok-4.6-high-fast.</text>
+    <text x="80" y="140" fill="#111417" font-size="16" font-weight="700">Time to first semantic byte  ·  trimmed mean of 8</text>
+<line x1="80" y1="366.0" x2="1044" y2="366.0" stroke="#ece7e2"/>
+<text x="70" y="370.0" fill="#6b6560" font-size="11" text-anchor="end">0</text>
+<line x1="80" y1="326.0" x2="1044" y2="326.0" stroke="#ece7e2"/>
+<text x="70" y="330.0" fill="#6b6560" font-size="11" text-anchor="end">2s</text>
+<line x1="80" y1="286.0" x2="1044" y2="286.0" stroke="#ece7e2"/>
+<text x="70" y="290.0" fill="#6b6560" font-size="11" text-anchor="end">4s</text>
+<line x1="80" y1="246.0" x2="1044" y2="246.0" stroke="#ece7e2"/>
+<text x="70" y="250.0" fill="#6b6560" font-size="11" text-anchor="end">6s</text>
+<line x1="80" y1="206.0" x2="1044" y2="206.0" stroke="#ece7e2"/>
+<text x="70" y="210.0" fill="#6b6560" font-size="11" text-anchor="end">8s</text>
+<line x1="80" y1="166.0" x2="1044" y2="166.0" stroke="#ece7e2"/>
+<text x="70" y="170.0" fill="#6b6560" font-size="11" text-anchor="end">10s</text>
+<line x1="80" y1="366" x2="1044" y2="366" stroke="#111417" stroke-width="1.25"/>
+<rect x="183.5" y="319.0" width="34" height="47.0" rx="4" fill="#ff6a33"/>
+<text x="200.5" y="312.0" fill="#ff6a33" font-size="12" font-weight="700" text-anchor="middle">2.35</text>
+<text x="200.5" y="386" fill="#111417" font-size="13" font-weight="700" text-anchor="middle">Claude Code</text>
+<text x="200.5" y="402" fill="#6b6560" font-size="11" text-anchor="middle">Messages</text>
+<text x="200.5" y="418" fill="#6b6560" font-size="11" text-anchor="middle">14.3 tools</text>
+<rect x="424.5" y="316.8" width="34" height="49.2" rx="4" fill="#ff6a33"/>
+<text x="441.5" y="309.8" fill="#ff6a33" font-size="12" font-weight="700" text-anchor="middle">2.46</text>
+<text x="441.5" y="386" fill="#111417" font-size="13" font-weight="700" text-anchor="middle">Codex</text>
+<text x="441.5" y="402" fill="#6b6560" font-size="11" text-anchor="middle">Responses</text>
+<text x="441.5" y="418" fill="#6b6560" font-size="11" text-anchor="middle">11.9 tools</text>
+<rect x="665.5" y="323.8" width="34" height="42.2" rx="4" fill="#ff6a33"/>
+<text x="682.5" y="316.8" fill="#ff6a33" font-size="12" font-weight="700" text-anchor="middle">2.11</text>
+<text x="682.5" y="386" fill="#111417" font-size="13" font-weight="700" text-anchor="middle">Grok Build</text>
+<text x="682.5" y="402" fill="#6b6560" font-size="11" text-anchor="middle">Responses</text>
+<text x="682.5" y="418" fill="#6b6560" font-size="11" text-anchor="middle">14.8 tools</text>
+<rect x="906.5" y="191.8" width="34" height="174.2" rx="4" fill="#111417"/>
+<text x="923.5" y="184.8" fill="#111417" font-size="12" font-weight="700" text-anchor="middle">8.71</text>
+<text x="923.5" y="386" fill="#111417" font-size="13" font-weight="700" text-anchor="middle">Raw CLI</text>
+<text x="923.5" y="402" fill="#6b6560" font-size="11" text-anchor="middle">agent -p</text>
+<text x="923.5" y="418" fill="#6b6560" font-size="11" text-anchor="middle">18.1 tools</text>
+    <text x="80" y="456" fill="#111417" font-size="16" font-weight="700">Wall-clock to stop  ·  trimmed mean of 8</text>
+<line x1="80" y1="682.0" x2="1044" y2="682.0" stroke="#ece7e2"/>
+<text x="70" y="686.0" fill="#6b6560" font-size="11" text-anchor="end">0</text>
+<line x1="80" y1="642.0" x2="1044" y2="642.0" stroke="#ece7e2"/>
+<text x="70" y="646.0" fill="#6b6560" font-size="11" text-anchor="end">25s</text>
+<line x1="80" y1="602.0" x2="1044" y2="602.0" stroke="#ece7e2"/>
+<text x="70" y="606.0" fill="#6b6560" font-size="11" text-anchor="end">50s</text>
+<line x1="80" y1="562.0" x2="1044" y2="562.0" stroke="#ece7e2"/>
+<text x="70" y="566.0" fill="#6b6560" font-size="11" text-anchor="end">75s</text>
+<line x1="80" y1="522.0" x2="1044" y2="522.0" stroke="#ece7e2"/>
+<text x="70" y="526.0" fill="#6b6560" font-size="11" text-anchor="end">100s</text>
+<line x1="80" y1="482.0" x2="1044" y2="482.0" stroke="#ece7e2"/>
+<text x="70" y="486.0" fill="#6b6560" font-size="11" text-anchor="end">125s</text>
+<line x1="80" y1="682" x2="1044" y2="682" stroke="#111417" stroke-width="1.25"/>
+<rect x="183.5" y="606.8" width="34" height="75.2" rx="4" fill="#ff6a33"/>
+<text x="200.5" y="599.8" fill="#ff6a33" font-size="12" font-weight="700" text-anchor="middle">47.0</text>
+<text x="200.5" y="702" fill="#111417" font-size="13" font-weight="700" text-anchor="middle">Claude Code</text>
+<text x="200.5" y="718" fill="#6b6560" font-size="11" text-anchor="middle">Messages</text>
+<text x="200.5" y="734" fill="#6b6560" font-size="11" text-anchor="middle">14.3 tools</text>
+<rect x="424.5" y="614.0" width="34" height="68.0" rx="4" fill="#ff6a33"/>
+<text x="441.5" y="607.0" fill="#ff6a33" font-size="12" font-weight="700" text-anchor="middle">42.5</text>
+<text x="441.5" y="702" fill="#111417" font-size="13" font-weight="700" text-anchor="middle">Codex</text>
+<text x="441.5" y="718" fill="#6b6560" font-size="11" text-anchor="middle">Responses</text>
+<text x="441.5" y="734" fill="#6b6560" font-size="11" text-anchor="middle">11.9 tools</text>
+<rect x="665.5" y="605.3" width="34" height="76.7" rx="4" fill="#ff6a33"/>
+<text x="682.5" y="598.3" fill="#ff6a33" font-size="12" font-weight="700" text-anchor="middle">47.9</text>
+<text x="682.5" y="702" fill="#111417" font-size="13" font-weight="700" text-anchor="middle">Grok Build</text>
+<text x="682.5" y="718" fill="#6b6560" font-size="11" text-anchor="middle">Responses</text>
+<text x="682.5" y="734" fill="#6b6560" font-size="11" text-anchor="middle">14.8 tools</text>
+<rect x="906.5" y="527.4" width="34" height="154.6" rx="4" fill="#111417"/>
+<text x="923.5" y="520.4" fill="#111417" font-size="12" font-weight="700" text-anchor="middle">96.6</text>
+<text x="923.5" y="702" fill="#111417" font-size="13" font-weight="700" text-anchor="middle">Raw CLI</text>
+<text x="923.5" y="718" fill="#6b6560" font-size="11" text-anchor="middle">agent -p</text>
+<text x="923.5" y="734" fill="#6b6560" font-size="11" text-anchor="middle">18.1 tools</text>
+  </g>
+  <text x="36" y="892" fill="#6b6560" font-size="11.5" font-family="ui-sans-serif, system-ui, sans-serif">Model: grok-4.6 on the proxy, cursor-grok-4.6-high-fast on CLI. Tools: proxy inspect loop vs CLI shell/read/mcp.</text>
+  <text x="36" y="908" fill="#6b6560" font-size="11.5" font-family="ui-sans-serif, system-ui, sans-serif">Source: LIVE_E2E_REPEATS=10 npm run live:pr2-e2e-grok · 40/40 pass · 2026-09-07 · agent 2026.09.02-c22c1a3 · Node v22.22.2 linux x64.</text>
+</svg>

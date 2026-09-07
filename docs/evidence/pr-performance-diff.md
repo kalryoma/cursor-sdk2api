@@ -95,7 +95,20 @@ Do not subtract the 1.5 s gateway settle from these rows. Both sides ran tools a
 
 Same model (`grok-4.6` / `cursor-grok-4.6-high-fast`) and the same PR #2 summary task. Orange is this gateway speaking Claude Code Messages, Codex Responses, or Grok Build Responses. Black is official `agent` with no HTTP proxy. Codex and Grok Build both `POST /v1/responses` with `fast`; Claude Code uses `POST /v1/messages`. Re-run with `CURSOR_LIVE_SMOKE=1 LIVE_E2E_REPEATS=10 npm run live:pr2-e2e-grok`.
 
-Live n=10 trimmed-mean numbers and chart land after that receipt.
+**n=10, drop one min and one max per metric, mean of the remaining 8.** Window: 2026-09-07. **40/40 pass** (no `api_error` retries).
+
+![Grok 4.6 PR #2 E2E: Claude Code vs Codex vs Grok Build vs raw Cursor CLI](../assets/grok-harness-pr2-e2e.svg)
+
+| Path | First byte | Duration | Tools | Rounds | Report chars |
+|---|---:|---:|---:|---:|---:|
+| Proxy Claude Code (`POST /v1/messages`) | 2.35s | 47.0s | 14.3 | 6.0 | 5877 |
+| Proxy Codex (`POST /v1/responses`) | 2.46s | **42.5s** | 11.9 | 4.9 | 5445 |
+| Proxy Grok Build (`POST /v1/responses`) | **2.11s** | 47.9s | 14.8 | 5.9 | 6116 |
+| Raw Cursor CLI (`cursor-grok-4.6-high-fast`) | 8.71s | 96.6s | 18.1 | 1 | 6337 |
+
+The three proxy harnesses are the same model doing the same inspect-and-report work. Wall clocks sit in a 42.5–47.9 s band (~5 s). Codex used fewer tools (11.9 vs 14–15), which is enough to explain it being the fastest orange bar — not a faster Grok. First byte is 2.1–2.5 s on every already-listening proxy path.
+
+CLI is ~2× the proxy wall clock (96.6 s) and ~4× the first byte (8.7 s). That matches the earlier PONG startup floor plus a heavier native tool mix (`shell` / `read` / `mcp`, 18.1 calls). This is not “Grok Build is slower than Codex in the product.” It is this gateway speaking those wire protocols, without spawning the Claude Code / Codex / Grok Build binaries.
 
 Receipt fields match `live:timing` where they exist: `first_byte_ms` (first thinking or assistant delta), `first_tool_ms`, `tool_lead_ms`, `duration_ms`. The machine JSON stays outside git.
 
