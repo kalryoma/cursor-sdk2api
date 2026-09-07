@@ -104,6 +104,8 @@ wire_api = "responses"
 env_key = "GATEWAY_ACCESS_KEY"
 ```
 
+如果让 Codex 走 [OpenCodex](https://opencodex.me/) 而不是直连本网关，请添加 `authMode=key` 的 `openai-responses` 供应商，`baseUrl` 为 `http://127.0.0.1:8080/v1`。不要使用 OpenCodex 实验性的 `cursor` adapter。完整步骤见 [OpenCodex integration](docs/OPENCODEX_INTEGRATION.md)。
+
 目前不支持强制依赖 `previous_response_id`、远端 response store 或 OpenAI 托管工具（`file_search`、`computer`、`shell`、`apply_patch`）的 Responses 客户端。Codex 顶层 `namespace` 工具会展开为客户端 function。
 
 ## 工具与搜索

@@ -14,6 +14,7 @@
 ## Unreleased
 
 - `/v1/responses` accepts Codex CLI 0.153+ top-level `type: "namespace"` tools the same way as `additional_tools` children. Empty grouping namespaces are ignored; hosted `web_search` still requires `HOSTED_SEARCH_MODE=auto`. Live Codex + Sonnet 5 low-effort receipt: `docs/evidence/2026-09-07-codex-cli-sonnet-5-live.md`.
+- Document OpenCodex as an `openai-responses` sidecar in front of this gateway. Live Codex-through-OpenCodex Sonnet 5 receipt: `docs/evidence/2026-09-07-opencodex-sonnet-5-live.md`.
 - Tool items stream when the SDK requests the tool; stream, non-stream body, replay, and `response.completed.output` share one ordered journal, including events that fire before `send()` resolves. Only the stop reason waits for the batch to close. Live `main` vs this branch: `docs/evidence/2026-09-06-pr-performance-diff.md`.
 - Round logs carry numeric timings per segment (`agent_ready_ms`, `first_sdk_event_ms`, `first_client_write_ms`, `tool_count`, `tool_spread_ms`, `batch_close_wait_ms`, `duration_ms`, `tool_result_gap_ms`). `SSE_HEARTBEAT_MS` (default 15000) keeps a started SSE response alive. `npm run live:timing` measures a tool round.
 - `@cursor/sdk` 1.0.31 with a rehashed `sand` patch contract. Delta schema and core adapter unchanged: `docs/evidence/2026-09-06-cursor-sdk-1.0.31-audit.md`.

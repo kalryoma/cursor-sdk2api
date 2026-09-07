@@ -104,6 +104,11 @@ wire_api = "responses"
 env_key = "GATEWAY_ACCESS_KEY"
 ```
 
+To run Codex through [OpenCodex](https://opencodex.me/) instead of talking to
+this gateway directly, add a key-auth `openai-responses` provider whose
+`baseUrl` is `http://127.0.0.1:8080/v1`. Do not use OpenCodex's experimental
+`cursor` adapter. Full recipe: [OpenCodex integration](docs/OPENCODEX_INTEGRATION.md).
+
 Responses clients that require `previous_response_id`, stored response objects, or hosted OpenAI tools (`file_search`, `computer`, `shell`, `apply_patch`) are not supported yet. Top-level Codex `namespace` tools flatten to client functions.
 
 ## Tools and search
