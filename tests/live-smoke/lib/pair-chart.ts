@@ -32,9 +32,9 @@ const GAP = 10;
 
 function niceMax(value: number): number {
   if (value <= 0) return 1;
-  const padded = value * 1.12;
+  const padded = value * 1.06;
   const pow = 10 ** Math.floor(Math.log10(padded));
-  for (const step of [1, 2, 2.5, 5, 10]) {
+  for (const step of [1, 1.25, 1.5, 2, 2.5, 4, 5, 8, 10]) {
     if (padded <= step * pow) return step * pow;
   }
   return 10 * pow;

@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 920" width="1080" height="920" role="img" aria-labelledby="title desc">
+  <title id="title">Same-work E2E: summarize PR #2 via this proxy vs raw Cursor CLI</title>
+  <desc id="desc">Inspect GitHub PR #2 and write a summary report. Orange = cursor-sdk2api on that harness wire protocol plus a client gh tool loop. Black = agent CLI, User API Key, no proxy.</desc>
+  <rect width="1080" height="920" fill="#fffdfb"/>
+  <rect x="0" y="0" width="8" height="920" fill="#ff6a33"/>
+  <text x="36" y="32" fill="#111417" font-size="22" font-weight="750" font-family="ui-sans-serif, system-ui, sans-serif">Same-work E2E: summarize PR #2 via this proxy vs raw Cursor CLI</text>
+  <text x="36" y="54" fill="#6b6560" font-size="13" font-family="ui-sans-serif, system-ui, sans-serif">Inspect GitHub PR #2 and write a summary report. Orange = cursor-sdk2api on that harness wire protocol plus a client gh tool loop. Black = agent CLI, User API Key, no proxy.</text>
+  <g font-family="ui-sans-serif, system-ui, sans-serif">
+    <rect x="36" y="68" width="14" height="14" rx="3" fill="#ff6a33"/>
+    <text x="56" y="80" fill="#111417" font-size="13">Proxy API (Claude Code / Codex / Grok Build protocol)</text>
+    <rect x="500" y="68" width="14" height="14" rx="3" fill="#111417"/>
+    <text x="520" y="80" fill="#111417" font-size="13">Raw Cursor CLI</text>
+    <rect x="36" y="90" width="1008" height="22" rx="6" fill="#fff4ee"/>
+    <text x="48" y="106" fill="#6b6560" font-size="12">Finished agent turn, not a PONG. Tool catalogs differ: gateway inspect tools vs CLI shell/read/mcp. Luna CLI used 19 tools vs 7 on the proxy.</text>
+    <text x="80" y="140" fill="#111417" font-size="16" font-weight="700">Time to first semantic byte  ·  PR #2 summary</text>
+<line x1="80" y1="366.0" x2="1044" y2="366.0" stroke="#ece7e2"/>
+<text x="70" y="370.0" fill="#6b6560" font-size="11" text-anchor="end">0</text>
+<line x1="80" y1="326.0" x2="1044" y2="326.0" stroke="#ece7e2"/>
+<text x="70" y="330.0" fill="#6b6560" font-size="11" text-anchor="end">5s</text>
+<line x1="80" y1="286.0" x2="1044" y2="286.0" stroke="#ece7e2"/>
+<text x="70" y="290.0" fill="#6b6560" font-size="11" text-anchor="end">10s</text>
+<line x1="80" y1="246.0" x2="1044" y2="246.0" stroke="#ece7e2"/>
+<text x="70" y="250.0" fill="#6b6560" font-size="11" text-anchor="end">15s</text>
+<line x1="80" y1="206.0" x2="1044" y2="206.0" stroke="#ece7e2"/>
+<text x="70" y="210.0" fill="#6b6560" font-size="11" text-anchor="end">20s</text>
+<line x1="80" y1="166.0" x2="1044" y2="166.0" stroke="#ece7e2"/>
+<text x="70" y="170.0" fill="#6b6560" font-size="11" text-anchor="end">25s</text>
+<line x1="80" y1="366" x2="1044" y2="366" stroke="#111417" stroke-width="1.25"/>
+<rect x="201.7" y="336.6" width="34" height="29.4" rx="4" fill="#ff6a33"/>
+<rect x="245.7" y="274.3" width="34" height="91.7" rx="4" fill="#111417"/>
+<text x="218.7" y="329.6" fill="#ff6a33" font-size="12" font-weight="700" text-anchor="middle">3.68</text>
+<text x="262.7" y="267.3" fill="#111417" font-size="12" font-weight="700" text-anchor="middle">11.5</text>
+<text x="240.7" y="386" fill="#111417" font-size="13" font-weight="700" text-anchor="middle">Sonnet 4.6</text>
+<text x="240.7" y="402" fill="#6b6560" font-size="11" text-anchor="middle">Claude Code · Messages</text>
+<text x="240.7" y="418" fill="#6b6560" font-size="11" text-anchor="middle">fast n/a · 9 vs 8 tools</text>
+<rect x="523.0" y="354.0" width="34" height="12.0" rx="4" fill="#ff6a33"/>
+<rect x="567.0" y="299.9" width="34" height="66.1" rx="4" fill="#111417"/>
+<text x="540.0" y="347.0" fill="#ff6a33" font-size="12" font-weight="700" text-anchor="middle">1.50</text>
+<text x="584.0" y="292.9" fill="#111417" font-size="12" font-weight="700" text-anchor="middle">8.26</text>
+<text x="562.0" y="386" fill="#111417" font-size="13" font-weight="700" text-anchor="middle">GPT-5.6 Luna</text>
+<text x="562.0" y="402" fill="#6b6560" font-size="11" text-anchor="middle">Codex · Responses</text>
+<text x="562.0" y="418" fill="#6b6560" font-size="11" text-anchor="middle">fast both · 7 vs 19 tools</text>
+<rect x="844.3" y="179.0" width="34" height="187.0" rx="4" fill="#ff6a33"/>
+<rect x="888.3" y="280.2" width="34" height="85.8" rx="4" fill="#111417"/>
+<text x="861.3" y="172.0" fill="#ff6a33" font-size="12" font-weight="700" text-anchor="middle">23.4</text>
+<text x="905.3" y="273.2" fill="#111417" font-size="12" font-weight="700" text-anchor="middle">10.7</text>
+<text x="883.3" y="386" fill="#111417" font-size="13" font-weight="700" text-anchor="middle">Grok 4.6</text>
+<text x="883.3" y="402" fill="#6b6560" font-size="11" text-anchor="middle">Grok Build · Responses</text>
+<text x="883.3" y="418" fill="#6b6560" font-size="11" text-anchor="middle">fast both · 14 vs 18 tools</text>
+    <text x="80" y="456" fill="#111417" font-size="16" font-weight="700">Wall-clock to stop  ·  tools + generations + report</text>
+<line x1="80" y1="682.0" x2="1044" y2="682.0" stroke="#ece7e2"/>
+<text x="70" y="686.0" fill="#6b6560" font-size="11" text-anchor="end">0</text>
+<line x1="80" y1="642.0" x2="1044" y2="642.0" stroke="#ece7e2"/>
+<text x="70" y="646.0" fill="#6b6560" font-size="11" text-anchor="end">25s</text>
+<line x1="80" y1="602.0" x2="1044" y2="602.0" stroke="#ece7e2"/>
+<text x="70" y="606.0" fill="#6b6560" font-size="11" text-anchor="end">50s</text>
+<line x1="80" y1="562.0" x2="1044" y2="562.0" stroke="#ece7e2"/>
+<text x="70" y="566.0" fill="#6b6560" font-size="11" text-anchor="end">75s</text>
+<line x1="80" y1="522.0" x2="1044" y2="522.0" stroke="#ece7e2"/>
+<text x="70" y="526.0" fill="#6b6560" font-size="11" text-anchor="end">100s</text>
+<line x1="80" y1="482.0" x2="1044" y2="482.0" stroke="#ece7e2"/>
+<text x="70" y="486.0" fill="#6b6560" font-size="11" text-anchor="end">125s</text>
+<line x1="80" y1="682" x2="1044" y2="682" stroke="#111417" stroke-width="1.25"/>
+<rect x="201.7" y="523.6" width="34" height="158.4" rx="4" fill="#ff6a33"/>
+<rect x="245.7" y="505.4" width="34" height="176.6" rx="4" fill="#111417"/>
+<text x="218.7" y="516.6" fill="#ff6a33" font-size="12" font-weight="700" text-anchor="middle">99.0</text>
+<text x="262.7" y="498.4" fill="#111417" font-size="12" font-weight="700" text-anchor="middle">110</text>
+<text x="240.7" y="702" fill="#111417" font-size="13" font-weight="700" text-anchor="middle">Sonnet 4.6</text>
+<text x="240.7" y="718" fill="#6b6560" font-size="11" text-anchor="middle">Claude Code · Messages</text>
+<text x="240.7" y="734" fill="#6b6560" font-size="11" text-anchor="middle">fast n/a · 9 vs 8 tools</text>
+<rect x="523.0" y="658.2" width="34" height="23.8" rx="4" fill="#ff6a33"/>
+<rect x="567.0" y="561.3" width="34" height="120.7" rx="4" fill="#111417"/>
+<text x="540.0" y="651.2" fill="#ff6a33" font-size="12" font-weight="700" text-anchor="middle">14.8</text>
+<text x="584.0" y="554.3" fill="#111417" font-size="12" font-weight="700" text-anchor="middle">75.5</text>
+<text x="562.0" y="702" fill="#111417" font-size="13" font-weight="700" text-anchor="middle">GPT-5.6 Luna</text>
+<text x="562.0" y="718" fill="#6b6560" font-size="11" text-anchor="middle">Codex · Responses</text>
+<text x="562.0" y="734" fill="#6b6560" font-size="11" text-anchor="middle">fast both · 7 vs 19 tools</text>
+<rect x="844.3" y="520.7" width="34" height="161.3" rx="4" fill="#ff6a33"/>
+<rect x="888.3" y="507.9" width="34" height="174.1" rx="4" fill="#111417"/>
+<text x="861.3" y="513.7" fill="#ff6a33" font-size="12" font-weight="700" text-anchor="middle">101</text>
+<text x="905.3" y="500.9" fill="#111417" font-size="12" font-weight="700" text-anchor="middle">109</text>
+<text x="883.3" y="702" fill="#111417" font-size="13" font-weight="700" text-anchor="middle">Grok 4.6</text>
+<text x="883.3" y="718" fill="#6b6560" font-size="11" text-anchor="middle">Grok Build · Responses</text>
+<text x="883.3" y="734" fill="#6b6560" font-size="11" text-anchor="middle">fast both · 14 vs 18 tools</text>
+  </g>
+  <text x="36" y="892" fill="#6b6560" font-size="11.5" font-family="ui-sans-serif, system-ui, sans-serif">Gateway models: claude-sonnet-4-6, gpt-5.6-luna + fast, grok-4.6 + fast. CLI: claude-4.6-sonnet-medium, gpt-5.6-luna-high-fast, cursor-grok-4.6-high-fast.</text>
+  <text x="36" y="908" fill="#6b6560" font-size="11.5" font-family="ui-sans-serif, system-ui, sans-serif">Source: npm run live:pr2-e2e · 6/6 pass · 2026-09-07 · agent 2026.09.02-c22c1a3 · Node v22.22.2 linux x64. Receipts keep timings and report_chars only.</text>
+</svg>
