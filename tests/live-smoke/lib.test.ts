@@ -16,6 +16,13 @@ import {
   summarizeCases,
   type SmokeCase,
 } from "./lib/receipt.js";
+import {
+  classifyCliEvent,
+  parseCliLine,
+  parseCliModelIds,
+  toolNameFromCall,
+  type CliMarks,
+} from "./lib/cli-stream.js";
 import { assertNoCanary, receiptContainsCanary, redactSecrets, redactValue } from "./lib/redact.js";
 import {
   containsOpaqueMarker,
@@ -146,6 +153,11 @@ test("redaction strips keys, bearer, home, and extra canaries", () => {
   expect(obj).toMatchObject({ authorization: "[redacted]", model: "composer-2.5", content: "[redacted]" });
 });
 
+test("redaction strips Cursor User API keys without a canary list", () => {
+  const key = "crsr_canarykey_ABCDEFGH12345678";
+  expect(redactSecrets(`export CURSOR_API_KEY=${key}`, [])).not.toContain(key);
+});
+
 test("receipt build refuses to emit a canary and omits payload fields", () => {
   const key = "sk-receipt-canary-XYZ12345";
   const cases: SmokeCase[] = [
@@ -231,4 +243,55 @@ test("SSE shape and usage pickers do not keep assistant text", () => {
   expect(tools).toEqual([{ id: "toolu_1", name: "live_alpha" }]);
   expect(containsOpaqueMarker({ content: [{ text: "mk_abc" }] }, "mk_abc")).toBe(true);
   expect(JSON.stringify(events.find((item) => item.event === "content_block_delta"))).toContain("secret-text");
+});
+
+test("CLI stream-json marks keep timings and tool names, not prompt or file bodies", () => {
+  const marks: CliMarks = { tool_items: [] };
+  const events = [
+    parseCliLine(
+      '{"type":"system","subtype":"init","model":"Claude 4 Sonnet","cwd":"/secret/path"}',
+    ),
+    parseCliLine(
+      '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hidden-prompt"}]}}',
+    ),
+    parseCliLine(
+      '{"type":"assistant","timestamp_ms":1,"message":{"role":"assistant","content":[{"type":"text","text":"hidden-delta"}]}}',
+    ),
+    parseCliLine(
+      '{"type":"assistant","timestamp_ms":2,"model_call_id":"mc_1","message":{"role":"assistant","content":[{"type":"text","text":"dup"}]}}',
+    ),
+    parseCliLine(
+      '{"type":"tool_call","subtype":"started","tool_call":{"readToolCall":{"args":{"path":"marker.txt"}}}}',
+    ),
+    parseCliLine(
+      '{"type":"tool_call","subtype":"completed","tool_call":{"readToolCall":{"result":{"success":{"content":"secret-file"}}}}}',
+    ),
+    parseCliLine(
+      '{"type":"tool_call","subtype":"started","tool_call":{"function":{"name":"live_beta"}}}',
+    ),
+    parseCliLine('{"type":"result","subtype":"success","duration_ms":1234,"is_error":false,"result":"hidden-final"}'),
+  ];
+  const clocks = [0, 5, 10, 20, 40, 50, 80, 90];
+  events.forEach((event, index) => {
+    expect(event).toBeDefined();
+    classifyCliEvent(event!, marks, clocks[index]!);
+  });
+  expect(marks).toEqual({
+    model: "Claude 4 Sonnet",
+    first_byte_ms: 10,
+    tool_items: [
+      { name: "read", at_ms: 40 },
+      { name: "live_beta", at_ms: 80 },
+    ],
+    stop_ms: 90,
+    stop_reason: "success",
+    cli_duration_ms: 1234,
+  });
+  expect(JSON.stringify(marks)).not.toContain("hidden");
+  expect(JSON.stringify(marks)).not.toContain("secret-file");
+  expect(toolNameFromCall({ writeToolCall: { args: { path: "x" } } })).toBe("write");
+  expect(parseCliModelIds('{"models":[{"id":"claude-sonnet-4-6"},{"id":"grok-4.6"}]}')).toEqual([
+    "claude-sonnet-4-6",
+    "grok-4.6",
+  ]);
 });

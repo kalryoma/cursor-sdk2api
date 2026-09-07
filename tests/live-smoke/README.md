@@ -12,7 +12,8 @@ export CURSOR_LIVE_SMOKE=1
 export CURSOR_API_KEY=...   # do not commit; do not paste into chat
 npm run live:smoke
 npm run live:ordinary   # exact-lineage ordinary follow-up only
-npm run live:timing     # where a tool round spends its time
+npm run live:timing     # where a gateway tool round spends its time
+npm run live:cli-timing # Cursor CLI direct-key baseline (no HTTP gateway)
 ```
 
 `live:timing` records first SSE byte, first/last tool item, stop, and gateway
@@ -21,6 +22,15 @@ round timings. It forwards `TOOL_BATCH_SETTLE_MS`, `TOOL_BATCH_IDLE_MS`,
 picks the Chat/Responses model (default: the first requested model).
 `LIVE_TIMING_REPO_ROOT` / `LIVE_TIMING_ENTRY` point the spawned child at another
 built checkout so the same runner can A/B two gateway revisions.
+
+`live:cli-timing` is the same three default models (`claude-sonnet-4-6`,
+`grok-4.6`, `composer-2.5`) on official Cursor CLI (`agent -p`,
+`CURSOR_API_KEY`). It does not start this gateway. Text uses `--mode ask`.
+Tool cases read isolated marker files through CLI-native tools, not
+`live_alpha` / `live_beta`. Requires the `agent` binary on `PATH` or
+`CURSOR_CLI_BIN`. Receipts stay in a temp file unless `LIVE_SMOKE_OUTPUT`
+is set. The published comparison lives in
+[`docs/evidence/pr-performance-diff.md`](../../docs/evidence/pr-performance-diff.md).
 
 Optional:
 

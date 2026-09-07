@@ -23,3 +23,25 @@ Before, tools land only in `finish()` (`tool_lead=0`, parallel items as one clum
 | Waits for stop (typical Claude Code) | Tools visible 1.5 s earlier; **round wall-clock unchanged** | **0 s** of settle removed |
 
 `TOOL_BATCH_IDLE_MS=300` (off by default) is the only setting that shortens stop wait (~1.2 s/round); Sonnet parallel batches can split. Settle exists because the SDK still has no generation-end event before local tools run; see Architecture.
+
+## Cursor CLI direct-key baseline
+
+Same three models as `live:timing` (`claude-sonnet-4-6`, `grok-4.6`, `composer-2.5`), measured on official Cursor CLI (`agent -p --output-format stream-json --stream-partial-output`) with a User API Key and **no** HTTP gateway. Re-run with `CURSOR_LIVE_SMOKE=1 npm run live:cli-timing`.
+
+This is the generation/harness floor the gateway numbers sit on. CLI has no Messages / Chat / Responses split, so each model is one CLI path. Tool cases use CLI-native file reads against isolated marker files, not `live_alpha` / `live_beta`. `tool_lead_ms` here is time from the first native tool start to the CLI `result` event; it is **not** the gateway 1.5 s settle.
+
+Receipt fields match `live:timing` where they exist: `first_byte_ms`, `first_tool_ms`, `tool_lead_ms`, `duration_ms`. The machine JSON stays outside git.
+
+| Case | First byte | First tool | Tool lead | Duration | Result |
+|---|---:|---:|---:|---:|---|
+| Sonnet CLI text | — | — | — | — | pending live run |
+| Sonnet CLI single | — | — | — | — | pending live run |
+| Sonnet CLI parallel | — | — | — | — | pending live run |
+| Grok CLI text | — | — | — | — | pending live run |
+| Grok CLI single | — | — | — | — | pending live run |
+| Grok CLI parallel | — | — | — | — | pending live run |
+| Composer CLI text | — | — | — | — | pending live run |
+| Composer CLI single | — | — | — | — | pending live run |
+| Composer CLI parallel | — | — | — | — | pending live run |
+
+Chat and Responses rows in the gateway table have no CLI counterpart.

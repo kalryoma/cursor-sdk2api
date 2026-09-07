@@ -38,6 +38,7 @@
     "live:smoke": "tsx tests/live-smoke/run.ts",
     "live:ordinary": "tsx tests/live-smoke/ordinary-turn-live.ts",
     "live:timing": "tsx tests/live-smoke/timing.ts",
+    "live:cli-timing": "tsx tests/live-smoke/cli-timing.ts",
     "new-api:smoke": "node integrations/new-api/smoke.mjs",
     "secret:scan": "bash tests/secret-scan.sh"
   },

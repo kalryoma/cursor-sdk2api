@@ -1,5 +1,5 @@
 const SECRET_LIKE =
-  /(sk-[A-Za-z0-9_-]{8,})|(Bearer\s+\S+)|(api[_-]?key["'\s:=]+)[^\s"',}]+/gi;
+  /(sk-[A-Za-z0-9_-]{8,})|(crsr_[A-Za-z0-9_-]{8,})|(Bearer\s+\S+)|(api[_-]?key["'\s:=]+)[^\s"',}]+/gi;
 const URL_CREDENTIALS = /([a-z][a-z0-9+.-]*:\/\/)[^\s/@:]+:[^\s/@]+@/gi;
 
 const BLOCKED_KEYS = new Set([
