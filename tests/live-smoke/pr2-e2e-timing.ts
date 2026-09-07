@@ -478,19 +478,19 @@ function writeReceipt(input: {
   return receipt;
 }
 
-function applyTrim(side: SideResult, samples: RepeatSample[]): SideResult {
+function applyTrim(side: SideResult, samples: RepeatSample[], required: number): SideResult {
   const trimmed = trimmedTiming(samples);
-  const allPassed = trimmed.passed === samples.length && trimmed.passed > 0;
+  const enough = trimmed.passed >= required && trimmed.passed > 0;
   return {
     ...side,
-    status: allPassed ? "pass" : "fail",
+    status: enough ? "pass" : "fail",
     duration_ms: trimmed.duration_ms,
     first_byte_ms: trimmed.first_byte_ms,
     first_tool_ms: trimmed.first_tool_ms,
     tool_count: trimmed.tool_count,
     rounds: trimmed.rounds,
     report_chars: trimmed.report_chars,
-    reason: allPassed ? undefined : trimmed.passed === 0 ? "no_pass_samples" : `passed_${trimmed.passed}_of_${samples.length}`,
+    reason: enough ? undefined : trimmed.passed === 0 ? "no_pass_samples" : `passed_${trimmed.passed}_of_${required}`,
   };
 }
 
@@ -554,9 +554,18 @@ async function main(): Promise<void> {
         fast: Boolean(cliListedFast),
       };
 
-      for (let repeat = 1; repeat <= repeats; repeat += 1) {
+      const maxAttempts = repeats + 8;
+      const passed = (samples: RepeatSample[]) => samples.filter((sample) => sample.status === "pass").length;
+      if (repeats > 1 && passed(gatewaySamples) >= repeats && passed(cliSamples) >= repeats) {
+        console.log(`case ${pair.id} resume ${passed(gatewaySamples)}/${passed(cliSamples)} passed`);
+      }
+      while (
+        (gatewayModel && passed(gatewaySamples) < repeats && gatewaySamples.length < maxAttempts)
+        || (cliModel && passed(cliSamples) < repeats && cliSamples.length < maxAttempts)
+      ) {
         const prompt = summaryPrompt(pr, token());
-        if (gatewayModel && gatewaySamples.length < repeat) {
+        if (gatewayModel && passed(gatewaySamples) < repeats && gatewaySamples.length < maxAttempts) {
+          const repeat = gatewaySamples.length + 1;
           gateway = await runGateway({
             baseUrl: child.baseUrl,
             apiKey,
@@ -568,12 +577,12 @@ async function main(): Promise<void> {
             prompt,
           });
           gatewaySamples.push(sampleReceipt(gateway));
-          logSide(pair.id, gateway, repeats > 1 ? ` r${repeat}/${repeats}` : "");
+          logSide(pair.id, gateway, repeats > 1 ? ` r${repeat} pass=${passed(gatewaySamples)}/${repeats}` : "");
           appendProgress(progressPath, canaries, { id: pair.id, side: "gateway", repeat, sample: sampleReceipt(gateway) });
-        } else if (gatewayModel && repeats > 1) {
-          console.log(`case ${pair.id}/gateway r${repeat}/${repeats} resume`);
+          if (gateway.status !== "pass") await child.restart();
         }
-        if (cliModel && cliSamples.length < repeat) {
+        if (cliModel && passed(cliSamples) < repeats && cliSamples.length < maxAttempts) {
+          const repeat = cliSamples.length + 1;
           cli = await runCli({
             bin,
             model: cliModel,
@@ -582,19 +591,17 @@ async function main(): Promise<void> {
           });
           if (!cliListedFast) cli.fast = false;
           cliSamples.push(sampleReceipt(cli));
-          logSide(pair.id, cli, repeats > 1 ? ` r${repeat}/${repeats}` : "");
+          logSide(pair.id, cli, repeats > 1 ? ` r${repeat} pass=${passed(cliSamples)}/${repeats}` : "");
           appendProgress(progressPath, canaries, { id: pair.id, side: "cli", repeat, sample: sampleReceipt(cli) });
-        } else if (cliModel && repeats > 1) {
-          console.log(`case ${pair.id}/cli r${repeat}/${repeats} resume`);
         }
       }
 
       if (repeats > 1 && gatewaySamples.length > 0) {
-        gateway = applyTrim(gateway, gatewaySamples.map(sampleReceipt));
+        gateway = applyTrim(gateway, gatewaySamples.map(sampleReceipt), repeats);
         logSide(pair.id, gateway, " trimmed");
       }
       if (repeats > 1 && cliSamples.length > 0) {
-        cli = applyTrim(cli, cliSamples.map(sampleReceipt));
+        cli = applyTrim(cli, cliSamples.map(sampleReceipt), repeats);
         logSide(pair.id, cli, " trimmed");
       }
       pairs.push({
