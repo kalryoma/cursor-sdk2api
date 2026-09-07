@@ -64,6 +64,19 @@ Same user turn: stream a text PONG to stop. No tools. Gateway process already li
 
 The proxy is not beating the model. After the first semantic byte both sides finish in 0.13–0.34 s. CLI’s extra 3–9 s is `agent` startup (sandbox, stream-json, system init) on every spawn. The gateway paid that once when the child process came up. A Claude Code / Codex / Grok Build **binary** pointed at this proxy would add its own startup on top of the orange bars.
 
+## Same-work end-to-end: summarize PR #2
+
+Same three pairs and fast-mode mapping as the PONG section. The user turn is now a finished agent task: inspect GitHub pull request #2 of this repo and write a summary report to stdout, without creating or editing files.
+
+| Side | How the work runs |
+|---|---|
+| Orange / proxy | This gateway speaking the harness wire protocol, plus a **client** tool loop (`pr_metadata`, `pr_files`, `pr_diff`, `read_repo_file`) that shells `gh` / reads the repo |
+| Black / CLI | Official `agent -p --force --sandbox disabled --workspace <repo>` with native tools. No HTTP proxy |
+
+This is the whole process: first semantic byte, first tool, tool rounds, generation of the report, and stop. It is not the one-word PONG and it is not `live:timing` stopping at the first tool batch. Re-run with `CURSOR_LIVE_SMOKE=1 npm run live:pr2-e2e`. Receipts keep timings, tool names, and `report_chars` only.
+
+Live numbers and chart land after the first `live:pr2-e2e` receipt.
+
 Receipt fields match `live:timing` where they exist: `first_byte_ms` (first thinking or assistant delta), `first_tool_ms`, `tool_lead_ms`, `duration_ms`. The machine JSON stays outside git.
 
 | Case | First byte | First tool | Tool lead | Duration | Result |

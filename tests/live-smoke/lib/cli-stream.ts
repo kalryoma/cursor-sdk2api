@@ -11,6 +11,8 @@ export interface CliMarks {
   error_type?: string;
   cli_duration_ms?: number;
   model?: string;
+  /** Final result length only — never the report text. */
+  report_chars?: number;
 }
 
 export function parseCliLine(raw: string): Record<string, unknown> | undefined {
@@ -66,6 +68,7 @@ export function classifyCliEvent(event: Record<string, unknown>, marks: CliMarks
     marks.stop_ms ??= now;
     marks.stop_reason = String(event.subtype ?? "result");
     if (typeof event.duration_ms === "number") marks.cli_duration_ms = event.duration_ms;
+    if (typeof event.result === "string") marks.report_chars = event.result.length;
     if (event.is_error === true) marks.error_type = "cli_error";
   }
 }

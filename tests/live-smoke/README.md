@@ -38,6 +38,14 @@ Codex Responses, and Grok Build Responses through this gateway versus
 official Cursor CLI. Fast is requested on both sides when the catalog
 exposes it. Do not compare its durations to `live:timing` tool rows.
 
+`live:pr2-e2e` is the same three pairs on a finished agent task: generate a
+summary report of this repo's PR #2. The gateway side runs a client tool
+loop (`pr_metadata`, `pr_files`, `pr_diff`, `read_repo_file`). The CLI
+side is `agent -p` against this workspace with sandbox disabled so `gh`
+can reach GitHub. Receipts keep timings, tool names, and report length.
+`LIVE_E2E_PR` overrides the PR number (default 2). Default per-request
+timeout is 240000. Do not commit the generated report text.
+
 Optional:
 
 - `GATEWAY_BASE_URL` — attach to an already running gateway instead of spawning `dist/index.js` on `127.0.0.1`. Restart cases are `not_run` and the process exits `2` (incomplete), not green.

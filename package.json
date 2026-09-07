@@ -40,6 +40,7 @@
     "live:timing": "tsx tests/live-smoke/timing.ts",
     "live:cli-timing": "tsx tests/live-smoke/cli-timing.ts",
     "live:harness-vs-cli": "tsx tests/live-smoke/harness-vs-cli-timing.ts",
+    "live:pr2-e2e": "tsx tests/live-smoke/pr2-e2e-timing.ts",
     "new-api:smoke": "node integrations/new-api/smoke.mjs",
     "secret:scan": "bash tests/secret-scan.sh"
   },
