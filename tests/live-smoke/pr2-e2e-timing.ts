@@ -479,7 +479,8 @@ function writeReceipt(input: {
 }
 
 function applyTrim(side: SideResult, samples: RepeatSample[], required: number): SideResult {
-  const trimmed = trimmedTiming(samples);
+  const capped = samples.filter((sample) => sample.status === "pass").slice(0, required);
+  const trimmed = trimmedTiming(capped);
   const enough = trimmed.passed >= required && trimmed.passed > 0;
   return {
     ...side,
@@ -613,8 +614,8 @@ async function main(): Promise<void> {
         ...(repeats > 1 ? {
           gateway_samples: gatewaySamples.map(sampleReceipt),
           cli_samples: cliSamples.map(sampleReceipt),
-          gateway_trimmed: trimmedTiming(gatewaySamples.map(sampleReceipt)),
-          cli_trimmed: trimmedTiming(cliSamples.map(sampleReceipt)),
+          gateway_trimmed: trimmedTiming(gatewaySamples.filter((sample) => sample.status === "pass").slice(0, repeats).map(sampleReceipt)),
+          cli_trimmed: trimmedTiming(cliSamples.filter((sample) => sample.status === "pass").slice(0, repeats).map(sampleReceipt)),
         } : {}),
       });
       writeReceipt({ output, canaries, repeats, pr, bin, pairs });
