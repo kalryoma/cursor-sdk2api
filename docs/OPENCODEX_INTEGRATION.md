@@ -73,6 +73,11 @@ Codex 0.153 may try `ws://127.0.0.1:10100/v1/responses` first and log `426
 Upgrade Required` when `websockets` is false. The request then falls back to
 SSE. That is expected, not a gateway failure.
 
+Live: `ocx provider test` 32 ms / 37 models including `cursor-sdk2api/claude-sonnet-5`.
+Direct OpenCodex Responses TTFB ~1.9 s. Codex through OpenCodex: ping ~2.6 s;
+local `exec_command` turn ~16 s. Not claimed: `adapter: "cursor"`, hosted OpenAI
+tools, WebSocket Responses, or managed multi-account.
+
 ## Not this path
 
 - OpenCodex `adapter: "cursor"` / `ocx login cursor` — private Cursor transport,

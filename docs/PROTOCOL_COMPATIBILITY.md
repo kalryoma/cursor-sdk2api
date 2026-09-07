@@ -9,6 +9,7 @@ Canonical internal contract is Anthropic Messages.
 | Claude Code | `POST /v1/messages` | `ANTHROPIC_BASE_URL` at the gateway origin. Chat Completions is the wrong shape. |
 | Grok Build | `POST /v1/responses` | Custom model `api_backend = "responses"`. Grok's optional `reasoning.encrypted_content` include is accepted but omitted. This adapter still rejects `previous_response_id`, `store=true`, conversation objects, unknown include expansions, and hosted tools. |
 | OpenAI SDK | `POST /v1/chat/completions` | `base_url` ends with `/v1`. |
+| Codex CLI | `POST /v1/responses` | `wire_api = responses`. Top-level `namespace` tools flatten to client functions. Disable `web_search` unless `HOSTED_SEARCH_MODE=auto`. Catalog includes `claude-sonnet-5` (Codex may warn it has no built-in metadata for that id). |
 | new-api | Messages or Chat | Match the upstream type. Do not mix both on one channel. |
 
 Outer agents (Claude Code, Grok Build) execute their own local file tools in the user's project. The gateway API Profile still uses an empty Cursor SDK workspace. Failed Chat/Responses requests log the concrete `invalid_request` reason (field/rule), not only `error_type`.
@@ -17,7 +18,7 @@ Outer agents (Claude Code, Grok Build) execute their own local file tools in the
 |---|---|---|
 | `GET /console/` | optional | Static BF Labs Operator Console served by the gateway. It manages the persistent Cursor account pool but does not add billing, users, or a second production process. |
 | `POST /v1/messages` non-stream text | yes | Native Anthropic `user`/`assistant` plus sub2api compatibility roles. `system`/`developer` preserve transcript order. Historical `tool`/`function` output is retained; a trailing compatibility tool result needs `tool_call_id`, `call_id`, or `id`. |
-| SSE text / thinking | yes | Incremental `onDelta` (`text-delta` / `thinking-delta`). `run.stream()` is tool/status/terminal. Tool items are written when the SDK requests the tool; stream, non-stream body, replay, and `response.completed.output` share one journal. `SSE_HEARTBEAT_MS` keeps a started stream alive. Timing: `docs/evidence/2026-09-04-tool-batch-close-live-probe.md`. |
+| SSE text / thinking | yes | Incremental `onDelta` (`text-delta` / `thinking-delta`). `run.stream()` is tool/status/terminal. Tool items are written when the SDK requests the tool; stream, non-stream body, replay, and `response.completed.output` share one journal. `SSE_HEARTBEAT_MS` keeps a started stream alive. |
 | images (base64) | yes | Mapped to SDK `images` |
 | client tools | yes | `local.customTools` |
 | parallel tools | yes | One assistant batch |

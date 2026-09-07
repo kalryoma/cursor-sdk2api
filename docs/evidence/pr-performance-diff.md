@@ -22,4 +22,4 @@ Before, tools land only in `finish()` (`tool_lead=0`, parallel items as one clum
 | Starts on the tool item (Codex `output_item.done`) | **1.5 s earlier** (~**2.1–2.5 s** on Sonnet parallel) | Up to ~45 s of tool work overlapped with the wait, if the tools take that long |
 | Waits for stop (typical Claude Code) | Tools visible 1.5 s earlier; **round wall-clock unchanged** | **0 s** of settle removed |
 
-`TOOL_BATCH_IDLE_MS=300` (off by default) is the only setting that shortens stop wait (~1.2 s/round); Sonnet parallel batches can split.
+`TOOL_BATCH_IDLE_MS=300` (off by default) is the only setting that shortens stop wait (~1.2 s/round); Sonnet parallel batches can split. Settle exists because the SDK still has no generation-end event before local tools run; see Architecture.
