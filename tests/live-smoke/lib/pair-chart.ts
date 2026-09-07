@@ -66,6 +66,28 @@ function escapeXml(text: string): string {
   return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
 
+export interface NamedBar {
+  label: string;
+  protocol: string;
+  note: string;
+  color: "proxy" | "cli";
+  first_byte_s: number;
+  duration_s: number;
+}
+
+export interface NamedBarChartInput {
+  title: string;
+  subtitle: string;
+  callout: string;
+  footer: string[];
+  firstByteCaption: string;
+  durationCaption: string;
+  bars: NamedBar[];
+}
+
+const PROXY = "#ff6a33";
+const CLI = "#111417";
+
 export function renderPairChart(input: PairChartInput): string {
   const firstMax = niceMax(Math.max(0, ...input.pairs.flatMap((row) => [row.gateway.first_byte_s, row.cli.first_byte_s])));
   const durationMax = niceMax(Math.max(0, ...input.pairs.flatMap((row) => [row.gateway.duration_s, row.cli.duration_s])));
@@ -125,8 +147,8 @@ function renderPlot(
     const cliX = center + GAP / 2;
     const gwY = yAt(gw, plot.top, plot.bottom, max);
     const cliY = yAt(cli, plot.top, plot.bottom, max);
-    return `<rect x="${gwX.toFixed(1)}" y="${gwY.toFixed(1)}" width="${BAR}" height="${(plot.bottom - gwY).toFixed(1)}" rx="4" fill="#ff6a33"/>
-<rect x="${cliX.toFixed(1)}" y="${cliY.toFixed(1)}" width="${BAR}" height="${(plot.bottom - cliY).toFixed(1)}" rx="4" fill="#111417"/>
+    return `<rect x="${gwX.toFixed(1)}" y="${gwY.toFixed(1)}" width="${BAR}" height="${(plot.bottom - gwY).toFixed(1)}" rx="4" fill="${PROXY}"/>
+<rect x="${cliX.toFixed(1)}" y="${cliY.toFixed(1)}" width="${BAR}" height="${(plot.bottom - cliY).toFixed(1)}" rx="4" fill="${CLI}"/>
 <text x="${(gwX + BAR / 2).toFixed(1)}" y="${(gwY - 7).toFixed(1)}" fill="#ff6a33" font-size="12" font-weight="700" text-anchor="middle">${formatBar(gw)}</text>
 <text x="${(cliX + BAR / 2).toFixed(1)}" y="${(cliY - 7).toFixed(1)}" fill="#111417" font-size="12" font-weight="700" text-anchor="middle">${formatBar(cli)}</text>
 <text x="${center.toFixed(1)}" y="${plot.bottom + 20}" fill="#111417" font-size="13" font-weight="700" text-anchor="middle">${escapeXml(row.label)}</text>
@@ -134,4 +156,62 @@ function renderPlot(
 <text x="${center.toFixed(1)}" y="${plot.bottom + 52}" fill="#6b6560" font-size="11" text-anchor="middle">${escapeXml(row.fast)}</text>`;
   }).join("\n");
   return `${grid}\n${axis}\n${bars}`;
+}
+
+export function renderNamedBarChart(input: NamedBarChartInput): string {
+  const firstMax = niceMax(Math.max(0, ...input.bars.map((bar) => bar.first_byte_s)));
+  const durationMax = niceMax(Math.max(0, ...input.bars.map((bar) => bar.duration_s)));
+  const firstPlot = { top: 166, bottom: 366 };
+  const durationPlot = { top: 482, bottom: 682 };
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${WIDTH} ${HEIGHT}" width="${WIDTH}" height="${HEIGHT}" role="img" aria-labelledby="title desc">
+  <title id="title">${escapeXml(input.title)}</title>
+  <desc id="desc">${escapeXml(input.subtitle)}</desc>
+  <rect width="${WIDTH}" height="${HEIGHT}" fill="#fffdfb"/>
+  <rect x="0" y="0" width="8" height="${HEIGHT}" fill="${PROXY}"/>
+  <text x="36" y="32" fill="#111417" font-size="22" font-weight="750" font-family="ui-sans-serif, system-ui, sans-serif">${escapeXml(input.title)}</text>
+  <text x="36" y="54" fill="#6b6560" font-size="13" font-family="ui-sans-serif, system-ui, sans-serif">${escapeXml(input.subtitle)}</text>
+  <g font-family="ui-sans-serif, system-ui, sans-serif">
+    <rect x="36" y="68" width="14" height="14" rx="3" fill="${PROXY}"/>
+    <text x="56" y="80" fill="#111417" font-size="13">Proxy API (Claude Code / Codex / Grok Build)</text>
+    <rect x="500" y="68" width="14" height="14" rx="3" fill="${CLI}"/>
+    <text x="520" y="80" fill="#111417" font-size="13">Raw Cursor CLI</text>
+    <rect x="36" y="90" width="1008" height="22" rx="6" fill="#fff4ee"/>
+    <text x="48" y="106" fill="#6b6560" font-size="12">${escapeXml(input.callout)}</text>
+    <text x="80" y="140" fill="#111417" font-size="16" font-weight="700">${escapeXml(input.firstByteCaption)}</text>
+${renderNamedPlot(input.bars, firstPlot, firstMax, "first_byte_s")}
+    <text x="80" y="456" fill="#111417" font-size="16" font-weight="700">${escapeXml(input.durationCaption)}</text>
+${renderNamedPlot(input.bars, durationPlot, durationMax, "duration_s")}
+  </g>
+  <text x="36" y="892" fill="#6b6560" font-size="11.5" font-family="ui-sans-serif, system-ui, sans-serif">${escapeXml(input.footer[0] ?? "")}</text>
+  <text x="36" y="908" fill="#6b6560" font-size="11.5" font-family="ui-sans-serif, system-ui, sans-serif">${escapeXml(input.footer[1] ?? "")}</text>
+</svg>
+`;
+}
+
+function renderNamedPlot(
+  bars: NamedBar[],
+  plot: { top: number; bottom: number },
+  max: number,
+  field: "first_byte_s" | "duration_s",
+): string {
+  const grid = ticks(max).map((value) => {
+    const y = yAt(value, plot.top, plot.bottom, max);
+    return `<line x1="${LEFT}" y1="${y.toFixed(1)}" x2="${RIGHT}" y2="${y.toFixed(1)}" stroke="#ece7e2"/>
+<text x="70" y="${(y + 4).toFixed(1)}" fill="#6b6560" font-size="11" text-anchor="end">${formatTick(value)}</text>`;
+  }).join("\n");
+  const axis = `<line x1="${LEFT}" y1="${plot.bottom}" x2="${RIGHT}" y2="${plot.bottom}" stroke="#111417" stroke-width="1.25"/>`;
+  const drawn = bars.map((bar, index) => {
+    const center = LEFT + ((RIGHT - LEFT) / bars.length) * (index + 0.5);
+    const value = bar[field];
+    const x = center - BAR / 2;
+    const y = yAt(value, plot.top, plot.bottom, max);
+    const fill = bar.color === "cli" ? CLI : PROXY;
+    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${BAR}" height="${(plot.bottom - y).toFixed(1)}" rx="4" fill="${fill}"/>
+<text x="${center.toFixed(1)}" y="${(y - 7).toFixed(1)}" fill="${fill}" font-size="12" font-weight="700" text-anchor="middle">${formatBar(value)}</text>
+<text x="${center.toFixed(1)}" y="${plot.bottom + 20}" fill="#111417" font-size="13" font-weight="700" text-anchor="middle">${escapeXml(bar.label)}</text>
+<text x="${center.toFixed(1)}" y="${plot.bottom + 36}" fill="#6b6560" font-size="11" text-anchor="middle">${escapeXml(bar.protocol)}</text>
+<text x="${center.toFixed(1)}" y="${plot.bottom + 52}" fill="#6b6560" font-size="11" text-anchor="middle">${escapeXml(bar.note)}</text>`;
+  }).join("\n");
+  return `${grid}\n${axis}\n${drawn}`;
 }

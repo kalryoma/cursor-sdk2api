@@ -73,7 +73,7 @@ interface PairResult {
   cli_trimmed?: TrimmedTiming;
 }
 
-const PAIRS: Pair[] = [
+const DEFAULT_PAIRS: Pair[] = [
   {
     id: "sonnet",
     harness: "claude-code",
@@ -99,6 +99,44 @@ const PAIRS: Pair[] = [
     cliFastModels: ["cursor-grok-4.6-high-fast"],
   },
 ];
+
+/** Same Grok 4.6 model and PR #2 task on each proxy harness, plus one CLI side. */
+const GROK_HARNESS_PAIRS: Pair[] = [
+  {
+    id: "claude-code",
+    harness: "claude-code",
+    protocol: "messages",
+    gatewayModels: ["grok-4.6"],
+    cliModels: [],
+    cliFastModels: [],
+  },
+  {
+    id: "codex",
+    harness: "codex",
+    protocol: "responses",
+    gatewayModels: ["grok-4.6"],
+    cliModels: [],
+    cliFastModels: [],
+  },
+  {
+    id: "grok-build",
+    harness: "grok-build",
+    protocol: "responses",
+    gatewayModels: ["grok-4.6"],
+    cliModels: [],
+    cliFastModels: [],
+  },
+  {
+    id: "cli",
+    harness: "grok-build",
+    protocol: "responses",
+    gatewayModels: [],
+    cliModels: ["cursor-grok-4.6-high"],
+    cliFastModels: ["cursor-grok-4.6-high-fast"],
+  },
+];
+
+const PAIRS = process.env.LIVE_E2E_MATRIX === "grok-harness" ? GROK_HARNESS_PAIRS : DEFAULT_PAIRS;
 
 const token = () => `tok-${randomBytes(4).toString("hex")}`;
 
@@ -156,6 +194,11 @@ async function runGateway(input: {
       authorization: `Bearer ${input.apiKey}`,
       "content-type": "application/json",
       "anthropic-version": "2023-06-01",
+      "user-agent": input.pair.harness === "claude-code"
+        ? "claude-cli/pr2-e2e"
+        : input.pair.harness === "codex"
+          ? "codex-cli/pr2-e2e"
+          : "grok-build/pr2-e2e",
     };
     if (sessionId) headers["x-cursor-session-id"] = sessionId;
     const res = await fetch(`${input.baseUrl}${path}`, {
@@ -459,6 +502,7 @@ function writeReceipt(input: {
       kind: "summary_report",
       repeats: input.repeats,
       trim: input.repeats > 1 ? "drop_min_max_per_metric" : "none",
+      matrix: process.env.LIVE_E2E_MATRIX === "grok-harness" ? "grok-harness" : "default",
     },
     ok: input.pairs.every((item) => item.gateway.status !== "fail" && item.cli.status !== "fail")
       && input.pairs.length === PAIRS.length,

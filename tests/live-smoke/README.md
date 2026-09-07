@@ -46,7 +46,10 @@ can reach GitHub. Receipts keep timings, tool names, and report length.
 `LIVE_E2E_PR` overrides the PR number (default 2). `LIVE_E2E_REPEATS`
 runs each side N times (default 1). When N≥3 the receipt stores every
 sample and a per-metric trimmed mean (drop one min and one max). Default
-per-request timeout is 240000. Do not commit the generated report text.
+per-request timeout is 240000. `LIVE_E2E_MATRIX=grok-harness` (or
+`npm run live:pr2-e2e-grok`) holds Grok 4.6 fixed and compares Claude
+Code Messages, Codex Responses, Grok Build Responses, and raw Cursor CLI
+on the same PR #2 summary. Do not commit the generated report text.
 
 Optional:
 

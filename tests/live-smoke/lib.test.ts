@@ -36,7 +36,7 @@ import {
   emptyHarnessTurn,
   flushOpenTools,
 } from "./lib/harness-turn.js";
-import { renderPairChart } from "./lib/pair-chart.js";
+import { renderNamedBarChart, renderPairChart } from "./lib/pair-chart.js";
 import { numericTrimmedMean, trimmedTiming } from "./lib/trimmed-mean.js";
 import {
   executeInspectTool,
@@ -474,6 +474,25 @@ test("pair chart keeps timings only and scales to the slower side", () => {
   expect(svg).toContain("80.0");
   expect(svg).not.toContain("secret");
   expect(svg).toContain("#ff6a33");
+});
+
+test("named-bar chart draws one bar per protocol", () => {
+  const svg = renderNamedBarChart({
+    title: "Grok 4.6 E2E",
+    subtitle: "Same model, same PR #2 task",
+    callout: "Three proxy harnesses vs raw CLI.",
+    footer: ["Grok 4.6 only.", "Source: live:pr2-e2e-grok"],
+    firstByteCaption: "First byte",
+    durationCaption: "Duration",
+    bars: [
+      { label: "Claude Code", protocol: "Messages", note: "proxy", color: "proxy", first_byte_s: 3, duration_s: 40 },
+      { label: "CLI", protocol: "agent", note: "raw", color: "cli", first_byte_s: 9, duration_s: 80 },
+    ],
+  });
+  expect(svg).toContain("40.0");
+  expect(svg).toContain("80.0");
+  expect(svg).toContain("#111417");
+  expect(svg).not.toContain("secret");
 });
 
 test("trimmed mean drops one min and one max then averages the rest", () => {

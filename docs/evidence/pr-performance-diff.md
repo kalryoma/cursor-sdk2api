@@ -91,6 +91,12 @@ An earlier single-pass window (2026-09-07, 6/6) is not the comparison row: Sonne
 
 Do not subtract the 1.5 s gateway settle from these rows. Both sides ran tools and produced a report. A Claude Code / Codex / Grok Build **binary** pointed at this proxy would add its own startup on top of orange.
 
+## Grok 4.6 only: three proxy harnesses vs Cursor CLI
+
+Same model (`grok-4.6` / `cursor-grok-4.6-high-fast`) and the same PR #2 summary task. Orange is this gateway speaking Claude Code Messages, Codex Responses, or Grok Build Responses. Black is official `agent` with no HTTP proxy. Codex and Grok Build both `POST /v1/responses` with `fast`; Claude Code uses `POST /v1/messages`. Re-run with `CURSOR_LIVE_SMOKE=1 LIVE_E2E_REPEATS=10 npm run live:pr2-e2e-grok`.
+
+Live n=10 trimmed-mean numbers and chart land after that receipt.
+
 Receipt fields match `live:timing` where they exist: `first_byte_ms` (first thinking or assistant delta), `first_tool_ms`, `tool_lead_ms`, `duration_ms`. The machine JSON stays outside git.
 
 | Case | First byte | First tool | Tool lead | Duration | Result |
