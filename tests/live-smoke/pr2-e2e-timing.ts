@@ -6,7 +6,7 @@
  */
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,6 +27,7 @@ import {
 import { assertNoCanary, redactSecrets } from "./lib/redact.js";
 import { liveSmokeGate } from "./lib/gate.js";
 import { startChildGateway } from "./lib/spawn.js";
+import { sampleReceipt, trimmedTiming, type RepeatSample, type TrimmedTiming } from "./lib/trimmed-mean.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..");
@@ -66,6 +67,10 @@ interface PairResult {
   protocol: HarnessProtocol;
   gateway: SideResult;
   cli: SideResult;
+  gateway_samples?: RepeatSample[];
+  cli_samples?: RepeatSample[];
+  gateway_trimmed?: TrimmedTiming;
+  cli_trimmed?: TrimmedTiming;
 }
 
 const PAIRS: Pair[] = [
@@ -390,18 +395,40 @@ async function listCliModels(bin: string, timeoutMs: number): Promise<string[]> 
   return parseCliModelIds(out);
 }
 
-function logSide(pairId: string, side: SideResult): void {
+function logSide(pairId: string, side: SideResult, extra = ""): void {
   console.log(
-    `case ${pairId}/${side.side} ${side.status}${side.model ? ` model=${side.model}` : ""}${
+    `case ${pairId}/${side.side}${extra} ${side.status}${side.model ? ` model=${side.model}` : ""}${
       side.fast ? " fast" : ""
-    }${side.duration_ms !== undefined ? ` ${side.duration_ms}ms` : ""}${
-      side.first_byte_ms !== undefined ? ` first_byte=${side.first_byte_ms}ms` : ""
-    }${side.first_tool_ms !== undefined ? ` first_tool=${side.first_tool_ms}ms` : ""}${
-      side.tool_count !== undefined ? ` tools=${side.tool_count}` : ""
-    }${side.rounds !== undefined ? ` rounds=${side.rounds}` : ""}${
-      side.report_chars !== undefined ? ` report_chars=${side.report_chars}` : ""
+    }${side.duration_ms !== undefined ? ` ${Math.round(side.duration_ms)}ms` : ""}${
+      side.first_byte_ms !== undefined ? ` first_byte=${Math.round(side.first_byte_ms)}ms` : ""
+    }${side.first_tool_ms !== undefined ? ` first_tool=${Math.round(side.first_tool_ms)}ms` : ""}${
+      side.tool_count !== undefined ? ` tools=${Math.round(side.tool_count)}` : ""
+    }${side.rounds !== undefined ? ` rounds=${Math.round(side.rounds)}` : ""}${
+      side.report_chars !== undefined ? ` report_chars=${Math.round(side.report_chars)}` : ""
     }${side.reason ? ` ${side.reason}` : ""}`,
   );
+}
+
+function appendProgress(path: string, canaries: string[], row: unknown): void {
+  const line = `${JSON.stringify(row)}\n`;
+  assertNoCanary(line, canaries);
+  appendFileSync(path, line, { encoding: "utf8", mode: 0o600 });
+}
+
+function applyTrim(side: SideResult, samples: RepeatSample[]): SideResult {
+  const trimmed = trimmedTiming(samples);
+  const allPassed = trimmed.passed === samples.length && trimmed.passed > 0;
+  return {
+    ...side,
+    status: allPassed ? "pass" : "fail",
+    duration_ms: trimmed.duration_ms,
+    first_byte_ms: trimmed.first_byte_ms,
+    first_tool_ms: trimmed.first_tool_ms,
+    tool_count: trimmed.tool_count,
+    rounds: trimmed.rounds,
+    report_chars: trimmed.report_chars,
+    reason: allPassed ? undefined : trimmed.passed === 0 ? "no_pass_samples" : `passed_${trimmed.passed}_of_${samples.length}`,
+  };
 }
 
 async function main(): Promise<void> {
@@ -413,8 +440,10 @@ async function main(): Promise<void> {
   const apiKey = process.env.CURSOR_API_KEY?.trim() ?? "";
   const canaries = [apiKey];
   const timeoutMs = Number.parseInt(process.env.LIVE_SMOKE_TIMEOUT_MS ?? "240000", 10);
+  const repeats = Math.max(1, Number.parseInt(process.env.LIVE_E2E_REPEATS ?? "1", 10));
   const pr = Number.parseInt(process.env.LIVE_E2E_PR ?? "2", 10);
   const output = process.env.LIVE_SMOKE_OUTPUT?.trim() || join(tmpdir(), `cursor-sdk2api-pr-e2e-${Date.now()}.json`);
+  const progressPath = `${output}.jsonl`;
   const bin = process.env.CURSOR_CLI_BIN?.trim() || "agent";
   const distEntry = join(repoRoot, "dist", "index.js");
   if (!existsSync(distEntry)) {
@@ -439,12 +468,18 @@ async function main(): Promise<void> {
     const cliIds = await listCliModels(bin, Math.min(timeoutMs, 60000));
 
     for (const pair of PAIRS) {
-      const prompt = summaryPrompt(pr, token());
       const gatewayModel = pickCatalogId(pair.gatewayModels, catalogIds);
       const cliListedFast = pair.cliFastModels.find((id) => cliIds.includes(id));
       const cliPlain = pair.cliModels.find((id) => cliIds.includes(id));
-      const gateway = gatewayModel
-        ? await runGateway({
+      const gatewaySamples: SideResult[] = [];
+      const cliSamples: SideResult[] = [];
+      let gateway: SideResult = { side: "gateway", status: "catalog_missing", fast: false };
+      let cli: SideResult = { side: "cli", status: "catalog_missing", fast: false };
+
+      for (let repeat = 1; repeat <= repeats; repeat += 1) {
+        const prompt = summaryPrompt(pr, token());
+        if (gatewayModel) {
+          gateway = await runGateway({
             baseUrl: child.baseUrl,
             apiKey,
             pair,
@@ -453,23 +488,51 @@ async function main(): Promise<void> {
             timeoutMs,
             pr,
             prompt,
-        })
-        : { side: "gateway" as const, status: "catalog_missing" as const, fast: false };
-      let cli: SideResult = { side: "cli", status: "catalog_missing", fast: false };
-      if (cliListedFast) {
-        cli = await runCli({ bin, model: cliListedFast, timeoutMs, prompt });
-      } else if (cliPlain) {
-        cli = await runCli({ bin, model: cliPlain, timeoutMs, prompt });
-        cli.fast = false;
+          });
+          gatewaySamples.push(gateway);
+          logSide(pair.id, gateway, repeats > 1 ? ` r${repeat}/${repeats}` : "");
+          appendProgress(progressPath, canaries, { id: pair.id, side: "gateway", repeat, sample: sampleReceipt(gateway) });
+        }
+        if (cliListedFast || cliPlain) {
+          cli = await runCli({
+            bin,
+            model: cliListedFast ?? cliPlain ?? "",
+            timeoutMs,
+            prompt,
+          });
+          if (!cliListedFast) cli.fast = false;
+          cliSamples.push(cli);
+          logSide(pair.id, cli, repeats > 1 ? ` r${repeat}/${repeats}` : "");
+          appendProgress(progressPath, canaries, { id: pair.id, side: "cli", repeat, sample: sampleReceipt(cli) });
+        }
       }
-      pairs.push({ id: pair.id, harness: pair.harness, protocol: pair.protocol, gateway, cli });
-      logSide(pair.id, gateway);
-      logSide(pair.id, cli);
+
+      if (repeats > 1 && gatewaySamples.length > 0) {
+        gateway = applyTrim(gateway, gatewaySamples.map(sampleReceipt));
+        logSide(pair.id, gateway, " trimmed");
+      }
+      if (repeats > 1 && cliSamples.length > 0) {
+        cli = applyTrim(cli, cliSamples.map(sampleReceipt));
+        logSide(pair.id, cli, " trimmed");
+      }
+      pairs.push({
+        id: pair.id,
+        harness: pair.harness,
+        protocol: pair.protocol,
+        gateway,
+        cli,
+        ...(repeats > 1 ? {
+          gateway_samples: gatewaySamples.map(sampleReceipt),
+          cli_samples: cliSamples.map(sampleReceipt),
+          gateway_trimmed: trimmedTiming(gatewaySamples.map(sampleReceipt)),
+          cli_trimmed: trimmedTiming(cliSamples.map(sampleReceipt)),
+        } : {}),
+      });
     }
 
     const receipt = {
-      schema: "cursor-sdk2api.pr-e2e.v1",
-      task: { pr, kind: "summary_report" },
+      schema: repeats > 1 ? "cursor-sdk2api.pr-e2e.v2" : "cursor-sdk2api.pr-e2e.v1",
+      task: { pr, kind: "summary_report", repeats, trim: repeats > 1 ? "drop_min_max_per_metric" : "none" },
       ok: pairs.every((item) => item.gateway.status !== "fail" && item.cli.status !== "fail"),
       environment: {
         node: process.version,

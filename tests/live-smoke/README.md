@@ -43,8 +43,10 @@ summary report of this repo's PR #2. The gateway side runs a client tool
 loop (`pr_metadata`, `pr_files`, `pr_diff`, `read_repo_file`). The CLI
 side is `agent -p` against this workspace with sandbox disabled so `gh`
 can reach GitHub. Receipts keep timings, tool names, and report length.
-`LIVE_E2E_PR` overrides the PR number (default 2). Default per-request
-timeout is 240000. Do not commit the generated report text.
+`LIVE_E2E_PR` overrides the PR number (default 2). `LIVE_E2E_REPEATS`
+runs each side N times (default 1). When N≥3 the receipt stores every
+sample and a per-metric trimmed mean (drop one min and one max). Default
+per-request timeout is 240000. Do not commit the generated report text.
 
 Optional:
 

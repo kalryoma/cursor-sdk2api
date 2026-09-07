@@ -37,6 +37,7 @@ import {
   flushOpenTools,
 } from "./lib/harness-turn.js";
 import { renderPairChart } from "./lib/pair-chart.js";
+import { numericTrimmedMean, trimmedTiming } from "./lib/trimmed-mean.js";
 import {
   executeInspectTool,
   resolveRepoFile,
@@ -473,4 +474,22 @@ test("pair chart keeps timings only and scales to the slower side", () => {
   expect(svg).toContain("80.0");
   expect(svg).not.toContain("secret");
   expect(svg).toContain("#ff6a33");
+});
+
+test("trimmed mean drops one min and one max then averages the rest", () => {
+  expect(numericTrimmedMean([10, 20, 30, 40, 100]).mean).toBe(30);
+  expect(numericTrimmedMean([10, 20, 30, 40, 100]).dropped).toEqual([10, 100]);
+  expect(numericTrimmedMean([5, 7]).mean).toBe(6);
+  expect(numericTrimmedMean([5, 7]).dropped).toEqual([]);
+  const summary = trimmedTiming([
+    { status: "pass", duration_ms: 10, first_byte_ms: 1 },
+    { status: "pass", duration_ms: 20, first_byte_ms: 8 },
+    { status: "pass", duration_ms: 30, first_byte_ms: 2 },
+    { status: "fail", duration_ms: 999, first_byte_ms: 999 },
+  ]);
+  expect(summary.passed).toBe(3);
+  expect(summary.kept).toBe(1);
+  expect(summary.duration_ms).toBe(20);
+  expect(summary.first_byte_ms).toBe(2);
+  expect(JSON.stringify(summary)).not.toContain("999");
 });

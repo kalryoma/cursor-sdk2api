@@ -13,7 +13,7 @@
 
 ## Unreleased
 
-- Add `npm run live:cli-timing`, `npm run live:harness-vs-cli`, and `npm run live:pr2-e2e`. The PONG runner is the same-work text ping. The PR #2 runner measures a finished summary-report turn (tools + generations + stop) on the same three harness pairs. Charts are in `docs/evidence/pr-performance-diff.md`.
+- Add `npm run live:cli-timing`, `npm run live:harness-vs-cli`, and `npm run live:pr2-e2e`. The PONG runner is the same-work text ping. The PR #2 runner measures a finished summary-report turn (tools + generations + stop) on the same three harness pairs. `LIVE_E2E_REPEATS` stores every sample and a min/max-trimmed mean. Charts are in `docs/evidence/pr-performance-diff.md`.
 - `/v1/responses` accepts Codex CLI 0.153+ top-level `type: "namespace"` tools the same way as `additional_tools` children. Empty grouping namespaces are ignored; hosted `web_search` still requires `HOSTED_SEARCH_MODE=auto`.
 - Document OpenCodex as an `openai-responses` sidecar in front of this gateway.
 - Tool items stream when the SDK requests the tool; stream, non-stream body, replay, and `response.completed.output` share one ordered journal, including events that fire before `send()` resolves. Only the stop reason waits for the batch to close.
