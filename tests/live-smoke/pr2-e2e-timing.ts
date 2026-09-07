@@ -6,7 +6,7 @@
  */
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -409,10 +409,73 @@ function logSide(pairId: string, side: SideResult, extra = ""): void {
   );
 }
 
+interface ProgressRow {
+  id: string;
+  side: "gateway" | "cli";
+  repeat: number;
+  sample: RepeatSample;
+}
+
+function loadProgress(path: string): ProgressRow[] {
+  if (!existsSync(path)) return [];
+  const rows: ProgressRow[] = [];
+  for (const line of readFileSync(path, "utf8").split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const row = JSON.parse(line) as ProgressRow;
+      if (row.id && (row.side === "gateway" || row.side === "cli") && row.sample) rows.push(row);
+    } catch {
+      // skip a broken progress line
+    }
+  }
+  return rows;
+}
+
+function progressSamples(rows: ProgressRow[], id: string, side: "gateway" | "cli"): RepeatSample[] {
+  return rows
+    .filter((row) => row.id === id && row.side === side)
+    .sort((a, b) => a.repeat - b.repeat)
+    .map((row) => row.sample);
+}
+
 function appendProgress(path: string, canaries: string[], row: unknown): void {
   const line = `${JSON.stringify(row)}\n`;
   assertNoCanary(line, canaries);
   appendFileSync(path, line, { encoding: "utf8", mode: 0o600 });
+}
+
+function writeReceipt(input: {
+  output: string;
+  canaries: string[];
+  repeats: number;
+  pr: number;
+  bin: string;
+  pairs: PairResult[];
+}): { ok: boolean } {
+  const receipt = {
+    schema: input.repeats > 1 ? "cursor-sdk2api.pr-e2e.v2" : "cursor-sdk2api.pr-e2e.v1",
+    task: {
+      pr: input.pr,
+      kind: "summary_report",
+      repeats: input.repeats,
+      trim: input.repeats > 1 ? "drop_min_max_per_metric" : "none",
+    },
+    ok: input.pairs.every((item) => item.gateway.status !== "fail" && item.cli.status !== "fail")
+      && input.pairs.length === PAIRS.length,
+    environment: {
+      node: process.version,
+      platform: process.platform,
+      arch: process.arch,
+      runner: "tests/live-smoke/pr2-e2e-timing",
+      cli_bin: input.bin,
+    },
+    pairs: input.pairs,
+  };
+  const serialized = `${JSON.stringify(receipt, null, 2)}\n`;
+  assertNoCanary(serialized, input.canaries);
+  mkdirSync(dirname(input.output), { recursive: true });
+  writeFileSync(input.output, serialized, { encoding: "utf8", mode: 0o600 });
+  return receipt;
 }
 
 function applyTrim(side: SideResult, samples: RepeatSample[]): SideResult {
@@ -467,43 +530,62 @@ async function main(): Promise<void> {
     if (catalogRes.status !== 200 || catalogIds.length === 0) throw new Error(`catalog unavailable (${catalogRes.status})`);
     const cliIds = await listCliModels(bin, Math.min(timeoutMs, 60000));
 
+    const prior = loadProgress(progressPath);
+    if (prior.length > 0) console.log(`resume ${prior.length} samples from ${progressPath}`);
+
     for (const pair of PAIRS) {
       const gatewayModel = pickCatalogId(pair.gatewayModels, catalogIds);
       const cliListedFast = pair.cliFastModels.find((id) => cliIds.includes(id));
       const cliPlain = pair.cliModels.find((id) => cliIds.includes(id));
-      const gatewaySamples: SideResult[] = [];
-      const cliSamples: SideResult[] = [];
-      let gateway: SideResult = { side: "gateway", status: "catalog_missing", fast: false };
-      let cli: SideResult = { side: "cli", status: "catalog_missing", fast: false };
+      const gatewayFast = gatewayModel ? catalogHasFast(catalog, gatewayModel) : false;
+      const cliModel = cliListedFast ?? cliPlain;
+      const gatewaySamples: RepeatSample[] = progressSamples(prior, pair.id, "gateway");
+      const cliSamples: RepeatSample[] = progressSamples(prior, pair.id, "cli");
+      let gateway: SideResult = {
+        side: "gateway",
+        status: gatewayModel ? "fail" : "catalog_missing",
+        model: gatewayModel,
+        fast: gatewayFast,
+      };
+      let cli: SideResult = {
+        side: "cli",
+        status: cliModel ? "fail" : "catalog_missing",
+        model: cliModel,
+        fast: Boolean(cliListedFast),
+      };
 
       for (let repeat = 1; repeat <= repeats; repeat += 1) {
         const prompt = summaryPrompt(pr, token());
-        if (gatewayModel) {
+        if (gatewayModel && gatewaySamples.length < repeat) {
           gateway = await runGateway({
             baseUrl: child.baseUrl,
             apiKey,
             pair,
             model: gatewayModel,
-            fast: catalogHasFast(catalog, gatewayModel),
+            fast: gatewayFast,
             timeoutMs,
             pr,
             prompt,
           });
-          gatewaySamples.push(gateway);
+          gatewaySamples.push(sampleReceipt(gateway));
           logSide(pair.id, gateway, repeats > 1 ? ` r${repeat}/${repeats}` : "");
           appendProgress(progressPath, canaries, { id: pair.id, side: "gateway", repeat, sample: sampleReceipt(gateway) });
+        } else if (gatewayModel && repeats > 1) {
+          console.log(`case ${pair.id}/gateway r${repeat}/${repeats} resume`);
         }
-        if (cliListedFast || cliPlain) {
+        if (cliModel && cliSamples.length < repeat) {
           cli = await runCli({
             bin,
-            model: cliListedFast ?? cliPlain ?? "",
+            model: cliModel,
             timeoutMs,
             prompt,
           });
           if (!cliListedFast) cli.fast = false;
-          cliSamples.push(cli);
+          cliSamples.push(sampleReceipt(cli));
           logSide(pair.id, cli, repeats > 1 ? ` r${repeat}/${repeats}` : "");
           appendProgress(progressPath, canaries, { id: pair.id, side: "cli", repeat, sample: sampleReceipt(cli) });
+        } else if (cliModel && repeats > 1) {
+          console.log(`case ${pair.id}/cli r${repeat}/${repeats} resume`);
         }
       }
 
@@ -528,25 +610,10 @@ async function main(): Promise<void> {
           cli_trimmed: trimmedTiming(cliSamples.map(sampleReceipt)),
         } : {}),
       });
+      writeReceipt({ output, canaries, repeats, pr, bin, pairs });
     }
 
-    const receipt = {
-      schema: repeats > 1 ? "cursor-sdk2api.pr-e2e.v2" : "cursor-sdk2api.pr-e2e.v1",
-      task: { pr, kind: "summary_report", repeats, trim: repeats > 1 ? "drop_min_max_per_metric" : "none" },
-      ok: pairs.every((item) => item.gateway.status !== "fail" && item.cli.status !== "fail"),
-      environment: {
-        node: process.version,
-        platform: process.platform,
-        arch: process.arch,
-        runner: "tests/live-smoke/pr2-e2e-timing",
-        cli_bin: bin,
-      },
-      pairs,
-    };
-    const serialized = `${JSON.stringify(receipt, null, 2)}\n`;
-    assertNoCanary(serialized, canaries);
-    mkdirSync(dirname(output), { recursive: true });
-    writeFileSync(output, serialized, { encoding: "utf8", mode: 0o600 });
+    const receipt = writeReceipt({ output, canaries, repeats, pr, bin, pairs });
     console.log(`receipt ${output}`);
     console.log(`ok=${receipt.ok}`);
     exitCode = receipt.ok ? 0 : 1;
