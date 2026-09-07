@@ -73,19 +73,21 @@ Same three pairs and fast-mode mapping as the PONG section. The user turn is now
 | Orange / proxy | This gateway speaking the harness wire protocol, plus a **client** tool loop (`pr_metadata`, `pr_files`, `pr_diff`, `read_repo_file`) that shells `gh` / reads the repo |
 | Black / CLI | Official `agent -p --force --sandbox disabled --workspace <repo>` with native tools. No HTTP proxy |
 
-This is the whole process: first semantic byte, first tool, tool rounds, generation of the report, and stop. It is not the one-word PONG and it is not `live:timing` stopping at the first tool batch. Re-run with `CURSOR_LIVE_SMOKE=1 npm run live:pr2-e2e`. Receipts keep timings, tool names, and `report_chars` only. Window: 2026-09-07, 6/6 pass.
+This is the whole process: first semantic byte, first tool, tool rounds, generation of the report, and stop. It is not the one-word PONG and it is not `live:timing` stopping at the first tool batch. Re-run with `CURSOR_LIVE_SMOKE=1 LIVE_E2E_REPEATS=10 npm run live:pr2-e2e`. Receipts keep timings, tool names, and `report_chars` only.
 
-![Same-work E2E PR #2 summary: harness protocol through this proxy vs raw Cursor CLI](../assets/harness-vs-cli-pr2-e2e.svg)
+**n=10, drop one min and one max per metric, mean of the remaining 8.** Window: 2026-09-07. Each side needed 10 passing turns (a few gateway `api_error` slots were retried and excluded from the ten). All six trimmed sides pass.
+
+![Same-work E2E PR #2 summary, n=10 trimmed mean: harness protocol through this proxy vs raw Cursor CLI](../assets/harness-vs-cli-pr2-e2e.svg)
 
 | Pair | Proxy first byte | CLI first byte | Proxy duration | CLI duration | Tools (proxy / CLI) | Proxy rounds | Report chars |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| Sonnet 4.6 | 3.68s | 11.46s | 99.0s | 110.4s | 9 / 8 | 6 | 6959 / 7604 |
-| Luna fast | 1.50s | 8.26s | 14.9s | 75.4s | 7 / 19 | 3 | 1156 / 1697 |
-| Grok 4.6 fast | 23.37s | 10.73s | 100.8s | 108.8s | 14 / 18 | 6 | 5701 / 5407 |
+| Sonnet 4.6 | 1.99s | 9.07s | 73.8s | 114.4s | 6.4 / 9.0 | 4.5 | 6407 / 6975 |
+| Luna fast | 9.01s | 13.74s | 17.3s | 85.6s | 5.5 / 13.0 | 2.9 | 1237 / 1698 |
+| Grok 4.6 fast | 2.90s | 9.00s | 49.0s | 107.8s | 12.0 / 17.6 | 5.4 | 5935 / 6347 |
 
-The tool catalogs are not identical. Orange executes four client inspect tools (`pr_metadata`, `pr_files`, `pr_diff`, `read_repo_file`). Black uses CLI-native `shell` / `read` / `glob` / `mcp`. Luna’s 15 s vs 75 s is mostly that: 7 inspect calls versus 19 CLI tools, not the proxy beating the model. Sonnet and Grok wall clocks landed within ~10 s of each other after a finished report.
+The tool catalogs are not identical. Orange executes four client inspect tools (`pr_metadata`, `pr_files`, `pr_diff`, `read_repo_file`). Black uses CLI-native `shell` / `read` / `glob` / `mcp`. Luna’s 17 s vs 86 s is still mostly 5.5 inspect calls versus 13 CLI tools, not the proxy beating the model. After trimming, Sonnet and Grok wall clocks favor the already-listening proxy by ~40–59 s; a large part of that is `agent` startup plus extra CLI tools.
 
-Grok’s first semantic byte was **slower** through the already-listening proxy (23.4 s) than through a freshly spawned `agent` (10.7 s). That is generation, not process start. CLI still paid ~8 s before first byte on Luna, matching the PONG startup floor.
+An earlier single-pass window (2026-09-07, 6/6) is not the comparison row: Sonnet 99.0s vs 110.4s, Luna 14.9s vs 75.4s, Grok 100.8s vs 108.8s. Grok’s one-shot first byte (23.4 s on the proxy) was an outlier the n=10 trim removed.
 
 Do not subtract the 1.5 s gateway settle from these rows. Both sides ran tools and produced a report. A Claude Code / Codex / Grok Build **binary** pointed at this proxy would add its own startup on top of orange.
 
