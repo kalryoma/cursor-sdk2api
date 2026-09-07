@@ -1,4 +1,4 @@
-# Codex CLI Sonnet 5 live probe — 2026-09-07
+# Codex CLI Sonnet 5 live probe
 
 Redacted public summary of a loopback Codex CLI 0.153.4 run against this gateway on `@cursor/sdk` 1.0.31. No API key, account identity, prompt, assistant text, tool schema, tool arguments, tool results, or home path is recorded.
 

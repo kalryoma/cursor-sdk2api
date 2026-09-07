@@ -11,7 +11,7 @@ The gateway sees a client tool only when the SDK calls `customTool.execute`. Not
 - With `TOOL_BATCH_SETTLE_MS=10000`, every timed batch closed on the settle timer. Tool items stream at `execute`; only the stop reason waits.
 - `live:smoke` on this branch: Sonnet 4.6, Grok 4.6, and Composer 2.5 pass the required matrix. Fable 5 `claude_code_shape` passes via the gated `systemPrompt` fallback; remaining Fable failures are `cursor_upstream_error` (model/upstream). The test account has no `systemPrompt` access.
 
-Same-suite `main` vs this PR: [2026-09-06-pr-performance-diff.md](2026-09-06-pr-performance-diff.md). 2026-09-07 redo (same client vs `6951f1b` and current): [2026-09-07-pr-performance-diff.md](2026-09-07-pr-performance-diff.md). SDK adapter check: [2026-09-06-cursor-sdk-1.0.31-audit.md](2026-09-06-cursor-sdk-1.0.31-audit.md).
+Before vs current timings: [pr-performance-diff.md](pr-performance-diff.md). SDK adapter check: [2026-09-06-cursor-sdk-1.0.31-audit.md](2026-09-06-cursor-sdk-1.0.31-audit.md).
 
 ## Gateway behavior
 

@@ -1,4 +1,4 @@
-# OpenCodex → cursor-sdk2api Sonnet 5 live probe — 2026-09-07
+# OpenCodex → cursor-sdk2api Sonnet 5 live probe
 
 Redacted public summary of Codex CLI 0.153.4 through OpenCodex 2.45.0 to this
 gateway on `@cursor/sdk` 1.0.31. No API key, account identity, prompt, assistant
