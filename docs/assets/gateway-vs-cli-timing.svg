@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 980" width="1080" height="980" role="img" aria-labelledby="title desc">
+  <title id="title">cursor-sdk2api gateway vs raw Cursor CLI on Sonnet, Grok, and Composer</title>
+  <desc id="desc">Grouped bar charts. Time to first tool is the comparable mark. Wall-clock to stop is different work: gateway stops at the first tool batch plus 1.5s settle; Cursor CLI finishes a native-tool turn. Values in seconds from the published live:timing current column and the 2026-09-07 CLI baseline. CLI text-only first byte was 8.58-9.81s; the gateway table has no text row.</desc>
+  <rect width="1080" height="980" fill="#fffdfb"/>
+  <rect x="0" y="0" width="8" height="980" fill="#ff6a33"/>
+  <text x="36" y="32" fill="#111417" font-size="22" font-weight="750" font-family="ui-sans-serif, system-ui, sans-serif">This repo as a harness vs raw Cursor CLI</text>
+  <text x="36" y="54" fill="#6b6560" font-size="13" font-family="ui-sans-serif, system-ui, sans-serif">Same model families. Orange = cursor-sdk2api gateway (current live:timing Messages). Black = official agent CLI, User API Key, no HTTP proxy.</text>
+  <g font-family="ui-sans-serif, system-ui, sans-serif">
+    <rect x="36" y="70" width="236" height="36" rx="8" fill="#fff4ee" stroke="#ffd4c2"/>
+<text x="48" y="85" fill="#6b6560" font-size="10.5">Sonnet CLI text-only</text>
+<text x="48" y="100" fill="#111417" font-size="12.5" font-weight="700">first byte 8.58s · done 9.32s</text>
+<rect x="284" y="70" width="236" height="36" rx="8" fill="#fff4ee" stroke="#ffd4c2"/>
+<text x="296" y="85" fill="#6b6560" font-size="10.5">Grok CLI text-only</text>
+<text x="296" y="100" fill="#111417" font-size="12.5" font-weight="700">first byte 9.81s · done 10.07s</text>
+<rect x="532" y="70" width="236" height="36" rx="8" fill="#fff4ee" stroke="#ffd4c2"/>
+<text x="544" y="85" fill="#6b6560" font-size="10.5">Composer CLI text-only</text>
+<text x="544" y="100" fill="#111417" font-size="12.5" font-weight="700">first byte 9.19s · done 9.41s</text>
+
+    <rect x="780" y="70" width="264" height="36" rx="8" fill="#111417"/>
+    <rect x="792" y="82" width="12" height="12" rx="2" fill="#ff6a33"/>
+    <text x="810" y="92" fill="#fffdfb" font-size="12">gateway</text>
+    <rect x="888" y="82" width="12" height="12" rx="2" fill="#fffdfb"/>
+    <text x="906" y="92" fill="#fffdfb" font-size="12">raw Cursor CLI</text>
+    <text x="72" y="140" fill="#111417" font-size="16" font-weight="700">Time to first tool  ·  comparable</text>
+<text x="1044" y="140" fill="#6b6560" font-size="12" text-anchor="end">Seconds from request start to first tool item</text>
+<line x1="72" y1="416.0" x2="1044" y2="416.0" stroke="#ece7e2" stroke-width="1"/>
+<text x="62" y="420.0" fill="#6b6560" font-size="11" text-anchor="end">0</text>
+<line x1="72" y1="374.3" x2="1044" y2="374.3" stroke="#ece7e2" stroke-width="1"/>
+<text x="62" y="378.3" fill="#6b6560" font-size="11" text-anchor="end">2s</text>
+<line x1="72" y1="332.7" x2="1044" y2="332.7" stroke="#ece7e2" stroke-width="1"/>
+<text x="62" y="336.7" fill="#6b6560" font-size="11" text-anchor="end">4s</text>
+<line x1="72" y1="291.0" x2="1044" y2="291.0" stroke="#ece7e2" stroke-width="1"/>
+<text x="62" y="295.0" fill="#6b6560" font-size="11" text-anchor="end">6s</text>
+<line x1="72" y1="249.3" x2="1044" y2="249.3" stroke="#ece7e2" stroke-width="1"/>
+<text x="62" y="253.3" fill="#6b6560" font-size="11" text-anchor="end">8s</text>
+<line x1="72" y1="207.7" x2="1044" y2="207.7" stroke="#ece7e2" stroke-width="1"/>
+<text x="62" y="211.7" fill="#6b6560" font-size="11" text-anchor="end">10s</text>
+<line x1="72" y1="166.0" x2="1044" y2="166.0" stroke="#ece7e2" stroke-width="1"/>
+<text x="62" y="170.0" fill="#6b6560" font-size="11" text-anchor="end">12s</text>
+<line x1="72" y1="416" x2="1044" y2="416" stroke="#111417" stroke-width="1.25"/>
+<rect x="127.5" y="304.1" width="22" height="111.9" rx="3" fill="#ff6a33"/>
+<rect x="156.5" y="182.0" width="22" height="234.0" rx="3" fill="#111417"/>
+<text x="138.5" y="298.1" fill="#ff6a33" font-size="10.5" font-weight="700" text-anchor="middle">5.37</text>
+<text x="167.5" y="176.0" fill="#111417" font-size="10.5" font-weight="700" text-anchor="middle">11.23</text>
+<text x="153.0" y="434" fill="#111417" font-size="12" font-weight="650" text-anchor="middle">Sonnet</text>
+<text x="153.0" y="450" fill="#6b6560" font-size="11" text-anchor="middle">single</text>
+<text x="153.0" y="466" fill="#6b6560" font-size="11" text-anchor="middle">2.1× CLI</text>
+<rect x="289.5" y="236.4" width="22" height="179.6" rx="3" fill="#ff6a33"/>
+<rect x="318.5" y="220.8" width="22" height="195.2" rx="3" fill="#111417"/>
+<text x="300.5" y="230.4" fill="#ff6a33" font-size="10.5" font-weight="700" text-anchor="middle">8.62</text>
+<text x="329.5" y="214.8" fill="#111417" font-size="10.5" font-weight="700" text-anchor="middle">9.37</text>
+<text x="315.0" y="434" fill="#111417" font-size="12" font-weight="650" text-anchor="middle">Sonnet</text>
+<text x="315.0" y="450" fill="#6b6560" font-size="11" text-anchor="middle">parallel</text>
+<text x="315.0" y="466" fill="#6b6560" font-size="11" text-anchor="middle">1.1× CLI</text>
+<rect x="451.5" y="357.0" width="22" height="59.0" rx="3" fill="#ff6a33"/>
+<rect x="480.5" y="197.0" width="22" height="219.0" rx="3" fill="#111417"/>
+<text x="462.5" y="351.0" fill="#ff6a33" font-size="10.5" font-weight="700" text-anchor="middle">2.83</text>
+<text x="491.5" y="191.0" fill="#111417" font-size="10.5" font-weight="700" text-anchor="middle">10.51</text>
+<text x="477.0" y="434" fill="#111417" font-size="12" font-weight="650" text-anchor="middle">Grok</text>
+<text x="477.0" y="450" fill="#6b6560" font-size="11" text-anchor="middle">single</text>
+<text x="477.0" y="466" fill="#6b6560" font-size="11" text-anchor="middle">3.7× CLI</text>
+<rect x="613.5" y="328.1" width="22" height="87.9" rx="3" fill="#ff6a33"/>
+<rect x="642.5" y="166.6" width="22" height="249.4" rx="3" fill="#111417"/>
+<text x="624.5" y="322.1" fill="#ff6a33" font-size="10.5" font-weight="700" text-anchor="middle">4.22</text>
+<text x="653.5" y="160.6" fill="#111417" font-size="10.5" font-weight="700" text-anchor="middle">11.97</text>
+<text x="639.0" y="434" fill="#111417" font-size="12" font-weight="650" text-anchor="middle">Grok</text>
+<text x="639.0" y="450" fill="#6b6560" font-size="11" text-anchor="middle">parallel</text>
+<text x="639.0" y="466" fill="#6b6560" font-size="11" text-anchor="middle">2.8× CLI</text>
+<rect x="775.5" y="354.5" width="22" height="61.5" rx="3" fill="#ff6a33"/>
+<rect x="804.5" y="246.4" width="22" height="169.6" rx="3" fill="#111417"/>
+<text x="786.5" y="348.5" fill="#ff6a33" font-size="10.5" font-weight="700" text-anchor="middle">2.95</text>
+<text x="815.5" y="240.4" fill="#111417" font-size="10.5" font-weight="700" text-anchor="middle">8.14</text>
+<text x="801.0" y="434" fill="#111417" font-size="12" font-weight="650" text-anchor="middle">Composer</text>
+<text x="801.0" y="450" fill="#6b6560" font-size="11" text-anchor="middle">single</text>
+<text x="801.0" y="466" fill="#6b6560" font-size="11" text-anchor="middle">2.8× CLI</text>
+<rect x="937.5" y="275.2" width="22" height="140.8" rx="3" fill="#ff6a33"/>
+<rect x="966.5" y="244.3" width="22" height="171.7" rx="3" fill="#111417"/>
+<text x="948.5" y="269.2" fill="#ff6a33" font-size="10.5" font-weight="700" text-anchor="middle">6.76</text>
+<text x="977.5" y="238.3" fill="#111417" font-size="10.5" font-weight="700" text-anchor="middle">8.24</text>
+<text x="963.0" y="434" fill="#111417" font-size="12" font-weight="650" text-anchor="middle">Composer</text>
+<text x="963.0" y="450" fill="#6b6560" font-size="11" text-anchor="middle">parallel</text>
+<text x="963.0" y="466" fill="#6b6560" font-size="11" text-anchor="middle">1.2× CLI</text>
+
+    <text x="72" y="508" fill="#111417" font-size="16" font-weight="700">Wall-clock to stop  ·  different work</text>
+<text x="1044" y="508" fill="#6b6560" font-size="12" text-anchor="end">Gateway: tool-batch + 1.5s settle. CLI: native read + follow-up turn</text>
+<line x1="72" y1="784.0" x2="1044" y2="784.0" stroke="#ece7e2" stroke-width="1"/>
+<text x="62" y="788.0" fill="#6b6560" font-size="11" text-anchor="end">0</text>
+<line x1="72" y1="742.3" x2="1044" y2="742.3" stroke="#ece7e2" stroke-width="1"/>
+<text x="62" y="746.3" fill="#6b6560" font-size="11" text-anchor="end">5s</text>
+<line x1="72" y1="700.7" x2="1044" y2="700.7" stroke="#ece7e2" stroke-width="1"/>
+<text x="62" y="704.7" fill="#6b6560" font-size="11" text-anchor="end">10s</text>
+<line x1="72" y1="659.0" x2="1044" y2="659.0" stroke="#ece7e2" stroke-width="1"/>
+<text x="62" y="663.0" fill="#6b6560" font-size="11" text-anchor="end">15s</text>
+<line x1="72" y1="617.3" x2="1044" y2="617.3" stroke="#ece7e2" stroke-width="1"/>
+<text x="62" y="621.3" fill="#6b6560" font-size="11" text-anchor="end">20s</text>
+<line x1="72" y1="575.7" x2="1044" y2="575.7" stroke="#ece7e2" stroke-width="1"/>
+<text x="62" y="579.7" fill="#6b6560" font-size="11" text-anchor="end">25s</text>
+<line x1="72" y1="534.0" x2="1044" y2="534.0" stroke="#ece7e2" stroke-width="1"/>
+<text x="62" y="538.0" fill="#6b6560" font-size="11" text-anchor="end">30s</text>
+<line x1="72" y1="784" x2="1044" y2="784" stroke="#111417" stroke-width="1.25"/>
+<rect x="127.5" y="726.8" width="22" height="57.3" rx="3" fill="#ff6a33"/>
+<rect x="156.5" y="622.8" width="22" height="161.3" rx="3" fill="#111417"/>
+<text x="138.5" y="720.8" fill="#ff6a33" font-size="10.5" font-weight="700" text-anchor="middle">6.87</text>
+<text x="167.5" y="616.8" fill="#111417" font-size="10.5" font-weight="700" text-anchor="middle">19.35</text>
+<text x="153.0" y="802" fill="#111417" font-size="12" font-weight="650" text-anchor="middle">Sonnet</text>
+<text x="153.0" y="818" fill="#6b6560" font-size="11" text-anchor="middle">single</text>
+<text x="153.0" y="834" fill="#6b6560" font-size="11" text-anchor="middle">2.8× CLI</text>
+<rect x="289.5" y="694.4" width="22" height="89.6" rx="3" fill="#ff6a33"/>
+<rect x="318.5" y="643.2" width="22" height="140.8" rx="3" fill="#111417"/>
+<text x="300.5" y="688.4" fill="#ff6a33" font-size="10.5" font-weight="700" text-anchor="middle">10.75</text>
+<text x="329.5" y="637.2" fill="#111417" font-size="10.5" font-weight="700" text-anchor="middle">16.90</text>
+<text x="315.0" y="802" fill="#111417" font-size="12" font-weight="650" text-anchor="middle">Sonnet</text>
+<text x="315.0" y="818" fill="#6b6560" font-size="11" text-anchor="middle">parallel</text>
+<text x="315.0" y="834" fill="#6b6560" font-size="11" text-anchor="middle">1.6× CLI</text>
+<rect x="451.5" y="747.9" width="22" height="36.1" rx="3" fill="#ff6a33"/>
+<rect x="480.5" y="635.2" width="22" height="148.8" rx="3" fill="#111417"/>
+<text x="462.5" y="741.9" fill="#ff6a33" font-size="10.5" font-weight="700" text-anchor="middle">4.33</text>
+<text x="491.5" y="629.2" fill="#111417" font-size="10.5" font-weight="700" text-anchor="middle">17.86</text>
+<text x="477.0" y="802" fill="#111417" font-size="12" font-weight="650" text-anchor="middle">Grok</text>
+<text x="477.0" y="818" fill="#6b6560" font-size="11" text-anchor="middle">single</text>
+<text x="477.0" y="834" fill="#6b6560" font-size="11" text-anchor="middle">4.1× CLI</text>
+<rect x="613.5" y="736.3" width="22" height="47.8" rx="3" fill="#ff6a33"/>
+<rect x="642.5" y="550.1" width="22" height="233.9" rx="3" fill="#111417"/>
+<text x="624.5" y="730.3" fill="#ff6a33" font-size="10.5" font-weight="700" text-anchor="middle">5.73</text>
+<text x="653.5" y="544.1" fill="#111417" font-size="10.5" font-weight="700" text-anchor="middle">28.07</text>
+<text x="639.0" y="802" fill="#111417" font-size="12" font-weight="650" text-anchor="middle">Grok</text>
+<text x="639.0" y="818" fill="#6b6560" font-size="11" text-anchor="middle">parallel</text>
+<text x="639.0" y="834" fill="#6b6560" font-size="11" text-anchor="middle">4.9× CLI</text>
+<rect x="775.5" y="746.9" width="22" height="37.1" rx="3" fill="#ff6a33"/>
+<rect x="804.5" y="656.5" width="22" height="127.5" rx="3" fill="#111417"/>
+<text x="786.5" y="740.9" fill="#ff6a33" font-size="10.5" font-weight="700" text-anchor="middle">4.45</text>
+<text x="815.5" y="650.5" fill="#111417" font-size="10.5" font-weight="700" text-anchor="middle">15.30</text>
+<text x="801.0" y="802" fill="#111417" font-size="12" font-weight="650" text-anchor="middle">Composer</text>
+<text x="801.0" y="818" fill="#6b6560" font-size="11" text-anchor="middle">single</text>
+<text x="801.0" y="834" fill="#6b6560" font-size="11" text-anchor="middle">3.4× CLI</text>
+<rect x="937.5" y="715.2" width="22" height="68.8" rx="3" fill="#ff6a33"/>
+<rect x="966.5" y="623.6" width="22" height="160.4" rx="3" fill="#111417"/>
+<text x="948.5" y="709.2" fill="#ff6a33" font-size="10.5" font-weight="700" text-anchor="middle">8.26</text>
+<text x="977.5" y="617.6" fill="#111417" font-size="10.5" font-weight="700" text-anchor="middle">19.25</text>
+<text x="963.0" y="802" fill="#111417" font-size="12" font-weight="650" text-anchor="middle">Composer</text>
+<text x="963.0" y="818" fill="#6b6560" font-size="11" text-anchor="middle">parallel</text>
+<text x="963.0" y="834" fill="#6b6560" font-size="11" text-anchor="middle">2.3× CLI</text>
+
+  </g>
+  <text x="36" y="952" fill="#6b6560" font-size="11.5" font-family="ui-sans-serif, system-ui, sans-serif">× CLI is CLI ÷ gateway on that panel. Do not subtract the 1.5s settle from CLI tool durations. Grok parallel CLI also ran glob / getMcpTools. Chat and Responses have no CLI counterpart.</text>
+  <text x="36" y="968" fill="#6b6560" font-size="11.5" font-family="ui-sans-serif, system-ui, sans-serif">Source: docs/evidence/pr-performance-diff.md · CLI 9/9 pass, 2026-09-07, agent 2026.09.02-c22c1a3, Node v22.22.2, linux x64. Text-only has no published gateway row.</text>
+</svg>

@@ -16,6 +16,33 @@ import {
   summarizeCases,
   type SmokeCase,
 } from "./lib/receipt.js";
+import {
+  classifyCliEvent,
+  parseCliLine,
+  parseCliModelIds,
+  resolveCliModel,
+  toolNameFromCall,
+  type CliMarks,
+} from "./lib/cli-stream.js";
+import {
+  classifyHarnessEvent,
+  isSemanticDelta,
+  parseSseChunk,
+  pickCatalogId,
+  type HarnessMarks,
+} from "./lib/harness-stream.js";
+import {
+  collectHarnessEvent,
+  emptyHarnessTurn,
+  flushOpenTools,
+} from "./lib/harness-turn.js";
+import { renderPairChart } from "./lib/pair-chart.js";
+import {
+  executeInspectTool,
+  resolveRepoFile,
+  summaryPrompt,
+  truncateText,
+} from "./lib/pr-inspect.js";
 import { assertNoCanary, receiptContainsCanary, redactSecrets, redactValue } from "./lib/redact.js";
 import {
   containsOpaqueMarker,
@@ -146,6 +173,11 @@ test("redaction strips keys, bearer, home, and extra canaries", () => {
   expect(obj).toMatchObject({ authorization: "[redacted]", model: "composer-2.5", content: "[redacted]" });
 });
 
+test("redaction strips Cursor User API keys without a canary list", () => {
+  const key = "crsr_canarykey_ABCDEFGH12345678";
+  expect(redactSecrets(`export CURSOR_API_KEY=${key}`, [])).not.toContain(key);
+});
+
 test("receipt build refuses to emit a canary and omits payload fields", () => {
   const key = "sk-receipt-canary-XYZ12345";
   const cases: SmokeCase[] = [
@@ -231,4 +263,214 @@ test("SSE shape and usage pickers do not keep assistant text", () => {
   expect(tools).toEqual([{ id: "toolu_1", name: "live_alpha" }]);
   expect(containsOpaqueMarker({ content: [{ text: "mk_abc" }] }, "mk_abc")).toBe(true);
   expect(JSON.stringify(events.find((item) => item.event === "content_block_delta"))).toContain("secret-text");
+});
+
+test("CLI stream-json marks keep timings and tool names, not prompt or file bodies", () => {
+  const marks: CliMarks = { tool_items: [] };
+  const events = [
+    parseCliLine(
+      '{"type":"system","subtype":"init","model":"Claude 4 Sonnet","cwd":"/secret/path"}',
+    ),
+    parseCliLine(
+      '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hidden-prompt"}]}}',
+    ),
+    parseCliLine(
+      '{"type":"thinking","subtype":"delta","timestamp_ms":1}',
+    ),
+    parseCliLine(
+      '{"type":"assistant","timestamp_ms":1,"message":{"role":"assistant","content":[{"type":"text","text":"hidden-delta"}]}}',
+    ),
+    parseCliLine(
+      '{"type":"assistant","timestamp_ms":2,"model_call_id":"mc_1","message":{"role":"assistant","content":[{"type":"text","text":"dup"}]}}',
+    ),
+    parseCliLine(
+      '{"type":"tool_call","subtype":"started","tool_call":{"readToolCall":{"args":{"path":"marker.txt"}}}}',
+    ),
+    parseCliLine(
+      '{"type":"tool_call","subtype":"completed","tool_call":{"readToolCall":{"result":{"success":{"content":"secret-file"}}}}}',
+    ),
+    parseCliLine(
+      '{"type":"tool_call","subtype":"started","tool_call":{"function":{"name":"live_beta"}}}',
+    ),
+    parseCliLine('{"type":"result","subtype":"success","duration_ms":1234,"is_error":false,"result":"hidden-final"}'),
+  ];
+  const clocks = [0, 5, 8, 10, 20, 40, 50, 80, 90];
+  events.forEach((event, index) => {
+    expect(event).toBeDefined();
+    classifyCliEvent(event!, marks, clocks[index]!);
+  });
+  expect(marks).toEqual({
+    model: "Claude 4 Sonnet",
+    first_byte_ms: 8,
+    tool_items: [
+      { name: "read", at_ms: 40 },
+      { name: "live_beta", at_ms: 80 },
+    ],
+    stop_ms: 90,
+    stop_reason: "success",
+    cli_duration_ms: 1234,
+    report_chars: 12,
+  });
+  expect(JSON.stringify(marks)).not.toContain("hidden");
+  expect(JSON.stringify(marks)).not.toContain("secret-file");
+  expect(toolNameFromCall({ writeToolCall: { args: { path: "x" } } })).toBe("write");
+  expect(parseCliModelIds('{"models":[{"id":"claude-sonnet-4-6"},{"id":"grok-4.6"}]}')).toEqual([
+    "claude-sonnet-4-6",
+    "grok-4.6",
+  ]);
+});
+
+test("CLI catalog maps live:timing model ids onto Cursor CLI slugs", () => {
+  const listed = parseCliModelIds(
+    [
+      "Available models",
+      "claude-4.6-sonnet-medium - Claude Sonnet 4.6 1M",
+      "cursor-grok-4.6-medium - Cursor Grok 4.6 Medium",
+      "composer-2.5 - Composer 2.5",
+    ].join("\n"),
+  );
+  expect(listed).toEqual(["claude-4.6-sonnet-medium", "cursor-grok-4.6-medium", "composer-2.5"]);
+  expect(resolveCliModel("claude-sonnet-4-6", listed)).toEqual({
+    requested: "claude-sonnet-4-6",
+    id: "claude-4.6-sonnet-medium",
+    how: "alias",
+  });
+  expect(resolveCliModel("grok-4.6", listed)).toEqual({
+    requested: "grok-4.6",
+    id: "cursor-grok-4.6-medium",
+    how: "alias",
+  });
+  expect(resolveCliModel("composer-2.5", listed)).toEqual({
+    requested: "composer-2.5",
+    id: "composer-2.5",
+    how: "exact",
+  });
+  expect(resolveCliModel("claude-fable-5", listed).how).toBe("missing");
+});
+
+test("harness SSE marks first semantic delta, not message_start", () => {
+  const marks: HarnessMarks = {};
+  const start = parseSseChunk('event: message_start\ndata: {"type":"message_start"}');
+  const think = parseSseChunk(
+    'event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"hidden"}}',
+  );
+  const stop = parseSseChunk(
+    'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}',
+  );
+  expect(isSemanticDelta("messages", start)).toBe(false);
+  expect(isSemanticDelta("messages", think)).toBe(true);
+  classifyHarnessEvent("messages", start, marks, 5);
+  classifyHarnessEvent("messages", think, marks, 40);
+  classifyHarnessEvent("messages", stop, marks, 90);
+  expect(marks).toEqual({ first_byte_ms: 40, stop_ms: 90, stop_reason: "end_turn" });
+  expect(JSON.stringify(marks)).not.toContain("hidden");
+  expect(isSemanticDelta("responses", parseSseChunk('data: {"type":"response.output_text.delta"}'))).toBe(true);
+  expect(pickCatalogId(["gpt-5.6-luna-high", "gpt-5.6-luna"], ["gpt-5.6-luna", "grok-4.6"])).toBe("gpt-5.6-luna");
+  expect(pickCatalogId(["claude-sonnet-4-6"], ["composer-2.5"])).toBeUndefined();
+});
+
+test("harness turn collects tool calls and text length without keeping report text", () => {
+  const marks = emptyHarnessTurn();
+  const open = new Map();
+  const events = [
+    parseSseChunk('event: message_start\ndata: {"type":"message_start","message":{"cursor_session_id":"ses_1"}}'),
+    parseSseChunk(
+      'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"pr_metadata","input":{}}}',
+    ),
+    parseSseChunk(
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"pr\\":2}"}}',
+    ),
+    parseSseChunk('event: content_block_stop\ndata: {"type":"content_block_stop","index":0}'),
+    parseSseChunk(
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"hidden-report"}}',
+    ),
+    parseSseChunk(
+      'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}',
+    ),
+  ];
+  events.forEach((event, index) => collectHarnessEvent("messages", event, marks, (index + 1) * 10, open));
+  flushOpenTools(marks, open);
+  expect(marks.session_id).toBe("ses_1");
+  expect(marks.first_tool_ms).toBe(20);
+  expect(marks.tool_calls).toEqual([{ id: "toolu_1", name: "pr_metadata", input: { pr: 2 } }]);
+  expect(marks.text_chars).toBe(13);
+  expect(marks.stop_reason).toBe("tool_use");
+  expect(JSON.stringify({ ...marks, tool_calls: marks.tool_calls.map((call) => ({ id: call.id, name: call.name })) })).not.toContain("hidden-report");
+});
+
+test("responses turn collects function_call arguments from the done item", () => {
+  const marks = emptyHarnessTurn();
+  const open = new Map();
+  collectHarnessEvent(
+    "responses",
+    parseSseChunk(
+      'event: response.output_item.added\ndata: {"type":"response.output_item.added","item":{"type":"function_call","call_id":"call_1","name":"pr_files"}}',
+    ),
+    marks,
+    15,
+    open,
+  );
+  collectHarnessEvent(
+    "responses",
+    parseSseChunk(
+      'event: response.output_item.done\ndata: {"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_1","name":"pr_files","arguments":"{\\"pr\\":2}"}}',
+    ),
+    marks,
+    40,
+    open,
+  );
+  expect(marks.tool_calls).toEqual([{ id: "call_1", name: "pr_files", input: { pr: 2 } }]);
+  expect(marks.tool_items[0]).toEqual({ name: "pr_files", at_ms: 15 });
+});
+
+test("PR inspect tools stay on the tasked PR and deny path escape", async () => {
+  const ran: string[][] = [];
+  const result = await executeInspectTool("pr_metadata", { pr: 2 }, {
+    repoRoot: "/workspace",
+    pr: 2,
+    runCommand: async (_file, args) => {
+      ran.push(args);
+      return { ok: true, stdout: '{"number":2}', stderr: "" };
+    },
+  });
+  expect(result.ok).toBe(true);
+  expect(result.chars).toBe(12);
+  expect(ran[0]?.slice(0, 3)).toEqual(["pr", "view", "2"]);
+  const denied = await executeInspectTool("pr_diff", { pr: 99 }, {
+    repoRoot: "/workspace",
+    pr: 2,
+    runCommand: async () => ({ ok: true, stdout: "nope", stderr: "" }),
+  });
+  expect(denied).toEqual({ ok: false, output: "only_pr_2_in_scope", chars: 18 });
+  expect(resolveRepoFile("/workspace", "../etc/passwd").ok).toBe(false);
+  expect(resolveRepoFile("/workspace", ".env").ok).toBe(false);
+  expect(resolveRepoFile("/workspace", "docs/SECURITY.md").ok).toBe(true);
+  expect(truncateText("abcdef", 4)).toEqual({
+    text: "abcd\n...[truncated 2 chars]",
+    truncated: true,
+    chars: 6,
+  });
+  expect(summaryPrompt(2, "tok-aa")).toContain("pull request #2");
+});
+
+test("pair chart keeps timings only and scales to the slower side", () => {
+  const svg = renderPairChart({
+    title: "E2E",
+    subtitle: "PR #2 summary",
+    callout: "Same task both sides.",
+    footer: ["Gateway models stay off the chart body.", "Source: live:pr2-e2e"],
+    firstByteCaption: "Time to first semantic byte",
+    durationCaption: "Wall-clock to stop",
+    pairs: [{
+      label: "Sonnet 4.6",
+      protocol: "Claude Code · Messages",
+      fast: "fast n/a",
+      gateway: { first_byte_s: 5, duration_s: 40 },
+      cli: { first_byte_s: 9, duration_s: 80 },
+    }],
+  });
+  expect(svg).toContain("40.0");
+  expect(svg).toContain("80.0");
+  expect(svg).not.toContain("secret");
+  expect(svg).toContain("#ff6a33");
 });

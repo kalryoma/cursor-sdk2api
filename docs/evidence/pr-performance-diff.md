@@ -23,3 +23,76 @@ Before, tools land only in `finish()` (`tool_lead=0`, parallel items as one clum
 | Waits for stop (typical Claude Code) | Tools visible 1.5 s earlier; **round wall-clock unchanged** | **0 s** of settle removed |
 
 `TOOL_BATCH_IDLE_MS=300` (off by default) is the only setting that shortens stop wait (~1.2 s/round); Sonnet parallel batches can split. Settle exists because the SDK still has no generation-end event before local tools run; see Architecture.
+
+## Cursor CLI direct-key baseline
+
+Same three `live:timing` model families, measured on official Cursor CLI (`agent` `2026.09.02-c22c1a3`, `-p --output-format stream-json --stream-partial-output`) with a User API Key and **no** HTTP gateway. Window: 2026-09-07, Node `v22.22.2`, linux x64, 9/9 pass. Re-run with `CURSOR_LIVE_SMOKE=1 npm run live:cli-timing`.
+
+CLI catalog slugs are not the gateway ids. The runner maps them and records both:
+
+| Gateway / live:timing id | CLI `--model` |
+|---|---|
+| `claude-sonnet-4-6` | `claude-4.6-sonnet-medium` |
+| `grok-4.6` | `cursor-grok-4.6-medium` |
+| `composer-2.5` | `composer-2.5` |
+
+This is the generation/harness floor the gateway numbers sit on. CLI has no Messages / Chat / Responses split. Text uses `--mode ask`. Tool cases use CLI-native file reads against isolated marker files, not `live_alpha` / `live_beta`. `tool_lead_ms` here is first native tool start → CLI `result` (tool exec + follow-up generation). It is **not** the gateway 1.5 s settle. Gateway `live:timing` tool rows stop when the first tool batch is published; they do not run the tools or a second model turn.
+
+![Earlier tool-batch gateway rows vs full-turn Cursor CLI — not the same work](../assets/gateway-vs-cli-timing.svg)
+
+**Do not use this chart as “proxy vs native.”** Orange here is `live:timing` stopping at the first tool batch plus the 1.5 s settle. Black is a finished Cursor CLI agent turn. The proxy is an extra HTTP layer; it cannot be faster at the same work because of that chart. The peach chips are CLI text-only and have no gateway text row. Use the same-work section below.
+
+## Same-work harness protocol vs Cursor CLI
+
+Orange **is** this repo’s proxy speaking the harness wire protocol (not a spawned Claude Code / Codex / Grok Build binary). Black **is** official Cursor CLI (`agent`) with the User API Key and no HTTP proxy.
+
+| Pair | Proxy path | Proxy model | CLI model | Fast |
+|---|---|---|---|---|
+| Sonnet 4.6 | Claude Code `POST /v1/messages` | `claude-sonnet-4-6` | `claude-4.6-sonnet-medium` | not advertised on either catalog; CLI `[fast=true]` exits 1 |
+| GPT-5.6 Luna | Codex `POST /v1/responses` | `gpt-5.6-luna` + `fast=true` | `gpt-5.6-luna-high-fast` | both |
+| Grok 4.6 | Grok Build `POST /v1/responses` | `grok-4.6` + `fast=true` | `cursor-grok-4.6-high-fast` | both |
+
+Same user turn: stream a text PONG to stop. No tools. Gateway process already listening; each CLI case spawns `agent`. Re-run with `CURSOR_LIVE_SMOKE=1 npm run live:harness-vs-cli`. Window: 2026-09-07, 6/6 pass.
+
+![Same-work text PONG: harness protocol through this proxy vs raw Cursor CLI](../assets/harness-vs-cli-same-work.svg)
+
+| Pair | Proxy first byte | CLI first byte | Proxy duration | CLI duration | After first byte |
+|---|---:|---:|---:|---:|---|
+| Sonnet 4.6 | 5.20s | 8.21s | 5.33s | 8.53s | 0.13s vs 0.32s |
+| Luna fast | 1.25s | 7.57s | 1.46s | 7.91s | 0.21s vs 0.34s |
+| Grok 4.6 fast | 1.38s | 10.14s | 1.51s | 10.38s | 0.13s vs 0.24s |
+
+The proxy is not beating the model. After the first semantic byte both sides finish in 0.13–0.34 s. CLI’s extra 3–9 s is `agent` startup (sandbox, stream-json, system init) on every spawn. The gateway paid that once when the child process came up. A Claude Code / Codex / Grok Build **binary** pointed at this proxy would add its own startup on top of the orange bars.
+
+## Same-work end-to-end: summarize PR #2
+
+Same three pairs and fast-mode mapping as the PONG section. The user turn is now a finished agent task: inspect GitHub pull request #2 of this repo and write a summary report to stdout, without creating or editing files.
+
+| Side | How the work runs |
+|---|---|
+| Orange / proxy | This gateway speaking the harness wire protocol, plus a **client** tool loop (`pr_metadata`, `pr_files`, `pr_diff`, `read_repo_file`) that shells `gh` / reads the repo |
+| Black / CLI | Official `agent -p --force --sandbox disabled --workspace <repo>` with native tools. No HTTP proxy |
+
+This is the whole process: first semantic byte, first tool, tool rounds, generation of the report, and stop. It is not the one-word PONG and it is not `live:timing` stopping at the first tool batch. Re-run with `CURSOR_LIVE_SMOKE=1 npm run live:pr2-e2e`. Receipts keep timings, tool names, and `report_chars` only.
+
+Live numbers and chart land after the first `live:pr2-e2e` receipt.
+
+Receipt fields match `live:timing` where they exist: `first_byte_ms` (first thinking or assistant delta), `first_tool_ms`, `tool_lead_ms`, `duration_ms`. The machine JSON stays outside git.
+
+| Case | First byte | First tool | Tool lead | Duration | Result |
+|---|---:|---:|---:|---:|---|
+| Sonnet CLI text | 8.58s | — | — | 9.32s | pass |
+| Sonnet CLI single | 19.00s | 11.23s | **7914 ms** | 19.35s | pass |
+| Sonnet CLI parallel | 16.66s | 9.37s | **7363 ms** | 16.90s | pass |
+| Grok CLI text | 9.81s | — | — | 10.07s | pass |
+| Grok CLI single | 9.30s | 10.51s | **7178 ms** | 17.86s | pass |
+| Grok CLI parallel | 10.48s | 11.97s | **15824 ms** | 28.07s | pass |
+| Composer CLI text | 9.19s | — | — | 9.41s | pass |
+| Composer CLI single | 8.14s | 8.14s | **6972 ms** | 15.30s | pass |
+| Composer CLI parallel | 8.24s | 8.24s | **10836 ms** | 19.25s | pass |
+
+Sonnet tool turns streamed the file `read` before any thinking/text (`first_tool` < `first_byte`). Composer started both in the same ~10 ms window. Grok parallel selected two `read`s and also `glob` / `getMcpTools` (spread 8.66 s); treat that extra tool work as model-nondeterministic, not a CLI scheduler claim.
+
+Text is the only same-shaped comparison: one generation, no tools. CLI first byte was 8.6–9.8 s and wall clock 9.3–10.1 s across the three families. Do not subtract the gateway 1.5 s settle from these CLI tool durations; the CLI paid a full agent turn.
+
+Chat and Responses rows in the gateway table have no CLI counterpart.

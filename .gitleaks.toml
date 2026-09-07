@@ -7,4 +7,5 @@ regexes = [
   '''^sk-canary-SECRET-123456789$''',
   '''^sk-live-canary-ABCDEFGH$''',
   '''^sk-receipt-canary-XYZ12345$''',
+  '''^crsr_canarykey_ABCDEFGH12345678$''',
 ]
