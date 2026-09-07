@@ -1,5 +1,7 @@
 # Performance diff — `main` vs this PR
 
+Redo on 2026-09-07 with the same models and the current `live:timing` client against both gateways: [2026-09-07-pr-performance-diff.md](2026-09-07-pr-performance-diff.md).
+
 Same 11-case live suite, production `TOOL_BATCH_SETTLE_MS=1500`, idle off. `main` `6951f1b` (`@cursor/sdk` 1.0.30) vs this branch (1.0.31), re-run after the prompt-binding and journal carry-over fixes. Both sides 11/11 pass.
 
 **`tool_lead_ms`** is the PR effect: first streamed tool item → stop. `duration_ms` still includes model generation and the same 1.5 s settle.
