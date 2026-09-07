@@ -14,6 +14,7 @@ import {
   classifyCliEvent,
   parseCliLine,
   parseCliModelIds,
+  resolveCliModel,
   type CliMarks,
 } from "./lib/cli-stream.js";
 import { redactSecrets, assertNoCanary } from "./lib/redact.js";
@@ -23,6 +24,7 @@ const DEFAULT_MODELS = "claude-sonnet-4-6,grok-4.6,composer-2.5";
 interface TimingCase {
   id: string;
   model: string;
+  cli_model?: string;
   protocol: "cli";
   status: "pass" | "fail" | "catalog_missing";
   duration_ms?: number;
@@ -45,13 +47,20 @@ export function resolveCliBin(env: NodeJS.ProcessEnv): string {
   return env.CURSOR_CLI_BIN?.trim() || "agent";
 }
 
-function toolCase(id: string, model: string, r: { duration_ms: number; marks: CliMarks }, minTools: number): TimingCase {
+function toolCase(
+  id: string,
+  model: string,
+  cliModel: string,
+  r: { duration_ms: number; marks: CliMarks },
+  minTools: number,
+): TimingCase {
   const first = r.marks.tool_items[0]?.at_ms;
   const last = r.marks.tool_items.at(-1)?.at_ms;
   const ok = !r.marks.error_type && r.marks.tool_items.length >= minTools && first !== undefined && r.marks.stop_ms !== undefined;
   return {
     id,
     model,
+    cli_model: cliModel,
     protocol: "cli",
     status: ok ? "pass" : "fail",
     duration_ms: r.duration_ms,
@@ -192,10 +201,12 @@ async function main(): Promise<void> {
   try {
     const catalogIds = await listCliModels(bin, Math.min(timeoutMs, 60000), canaries);
     for (const model of models) {
-      if (catalogIds.length > 0 && !catalogIds.includes(model)) {
+      const resolved = catalogIds.length > 0 ? resolveCliModel(model, catalogIds) : { requested: model, id: model, how: "exact" as const };
+      if (!resolved.id) {
         cases.push({ id: `${model}/cli`, model, protocol: "cli", status: "catalog_missing" });
         continue;
       }
+      const cliModel = resolved.id;
       const textDir = mkdtempSync(join(root, "text-"));
       const text = await runAgent({
         bin,
@@ -205,12 +216,14 @@ async function main(): Promise<void> {
           "stream-json",
           "--stream-partial-output",
           "--trust",
+          "--sandbox",
+          "enabled",
           "--mode",
           "ask",
           "--workspace",
           textDir,
           "--model",
-          model,
+          cliModel,
           `Reply with the single word PONG and nothing else. (${token()})`,
         ],
         cwd: textDir,
@@ -220,6 +233,7 @@ async function main(): Promise<void> {
       cases.push({
         id: `${model}/cli/text`,
         model,
+        cli_model: cliModel,
         protocol: "cli",
         status: text.exit_code === 0 && !text.marks.error_type && text.marks.first_byte_ms !== undefined && text.marks.stop_ms !== undefined
           ? "pass"
@@ -243,17 +257,19 @@ async function main(): Promise<void> {
           "stream-json",
           "--stream-partial-output",
           "--trust",
+          "--sandbox",
+          "enabled",
           "--workspace",
           singleDir,
           "--model",
-          model,
+          cliModel,
           `Read the file marker.txt using your file tool once. Then reply with the single word DONE. Do not write files. (${token()})`,
         ],
         cwd: singleDir,
         timeoutMs,
         canaries,
       });
-      cases.push(toolCase(`${model}/cli/single_tool`, model, single, 1));
+      cases.push(toolCase(`${model}/cli/single_tool`, model, cliModel, single, 1));
 
       const parallelDir = mkdtempSync(join(root, "parallel-"));
       writeFileSync(join(parallelDir, "alpha.txt"), "a\n", { mode: 0o600 });
@@ -266,17 +282,19 @@ async function main(): Promise<void> {
           "stream-json",
           "--stream-partial-output",
           "--trust",
+          "--sandbox",
+          "enabled",
           "--workspace",
           parallelDir,
           "--model",
-          model,
+          cliModel,
           `Read both independent files alpha.txt and beta.txt now, in the same turn, before answering. Then reply with DONE. Do not write files. (${token()})`,
         ],
         cwd: parallelDir,
         timeoutMs,
         canaries,
       });
-      cases.push(toolCase(`${model}/cli/parallel_tools`, model, parallel, 2));
+      cases.push(toolCase(`${model}/cli/parallel_tools`, model, cliModel, parallel, 2));
     }
 
     const receipt = {

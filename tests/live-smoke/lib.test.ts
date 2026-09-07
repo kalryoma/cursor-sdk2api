@@ -20,6 +20,7 @@ import {
   classifyCliEvent,
   parseCliLine,
   parseCliModelIds,
+  resolveCliModel,
   toolNameFromCall,
   type CliMarks,
 } from "./lib/cli-stream.js";
@@ -294,4 +295,32 @@ test("CLI stream-json marks keep timings and tool names, not prompt or file bodi
     "claude-sonnet-4-6",
     "grok-4.6",
   ]);
+});
+
+test("CLI catalog maps live:timing model ids onto Cursor CLI slugs", () => {
+  const listed = parseCliModelIds(
+    [
+      "Available models",
+      "claude-4.6-sonnet-medium - Claude Sonnet 4.6 1M",
+      "cursor-grok-4.6-medium - Cursor Grok 4.6 Medium",
+      "composer-2.5 - Composer 2.5",
+    ].join("\n"),
+  );
+  expect(listed).toEqual(["claude-4.6-sonnet-medium", "cursor-grok-4.6-medium", "composer-2.5"]);
+  expect(resolveCliModel("claude-sonnet-4-6", listed)).toEqual({
+    requested: "claude-sonnet-4-6",
+    id: "claude-4.6-sonnet-medium",
+    how: "alias",
+  });
+  expect(resolveCliModel("grok-4.6", listed)).toEqual({
+    requested: "grok-4.6",
+    id: "cursor-grok-4.6-medium",
+    how: "alias",
+  });
+  expect(resolveCliModel("composer-2.5", listed)).toEqual({
+    requested: "composer-2.5",
+    id: "composer-2.5",
+    how: "exact",
+  });
+  expect(resolveCliModel("claude-fable-5", listed).how).toBe("missing");
 });

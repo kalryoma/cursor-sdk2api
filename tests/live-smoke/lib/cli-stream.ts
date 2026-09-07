@@ -66,6 +66,24 @@ export function classifyCliEvent(event: Record<string, unknown>, marks: CliMarks
   }
 }
 
+/** Gateway / live:timing ids → official Cursor CLI slugs, first match wins. */
+export const CLI_MODEL_ALIASES: Record<string, readonly string[]> = {
+  "claude-sonnet-4-6": ["claude-4.6-sonnet-medium", "claude-4.6-sonnet-medium-thinking"],
+  "grok-4.6": ["cursor-grok-4.6-medium", "cursor-grok-4.6-high", "cursor-grok-4.6-medium-fast"],
+  "composer-2.5": ["composer-2.5"],
+};
+
+export function resolveCliModel(
+  requested: string,
+  catalogIds: readonly string[],
+): { requested: string; id?: string; how: "exact" | "alias" | "missing" } {
+  if (catalogIds.includes(requested)) return { requested, id: requested, how: "exact" };
+  for (const alias of CLI_MODEL_ALIASES[requested] ?? []) {
+    if (catalogIds.includes(alias)) return { requested, id: alias, how: "alias" };
+  }
+  return { requested, how: "missing" };
+}
+
 export function parseCliModelIds(stdout: string): string[] {
   const trimmed = stdout.trim();
   if (!trimmed) return [];
@@ -77,13 +95,17 @@ export function parseCliModelIds(stdout: string): string[] {
       // fall through to line scan
     }
   }
+  const skip = new Set(["available", "model", "models", "name", "tip"]);
   const ids = new Set<string>();
   for (const line of trimmed.split("\n")) {
+    const listed = line.match(/^([a-z0-9][a-z0-9._-]{2,})\s+-/i);
+    if (listed?.[1]) {
+      ids.add(listed[1]);
+      continue;
+    }
     const match = line.match(/\b([a-z0-9][a-z0-9._-]{2,})\b/i);
-    if (!match?.[1]) continue;
-    const id = match[1];
-    if (id === "model" || id === "models" || id === "name") continue;
-    ids.add(id);
+    if (!match?.[1] || skip.has(match[1].toLowerCase())) continue;
+    ids.add(match[1]);
   }
   return [...ids];
 }
