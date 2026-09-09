@@ -120,8 +120,9 @@ Client tools are converted to SDK `local.customTools` through MCP. The model cho
 - Supported: Claude Code, Grok, and Codex local tools, including client-owned web or network search.
 - Disabled: Cursor ambient shell, read, edit, and task. Hosted `webSearch` /
   `webFetch` stay off unless `HOSTED_SEARCH_MODE=auto` and the client sends a
-  bare live web_search tool. Filters, required/named choice, Chat
-  `web_search_options`, and `x_search` stay fail closed.
+  live web_search tool. Codex filter fields (`user_location`,
+  `search_context_size`, `external_web_access`) are accepted and ignored;
+  required/named choice, Chat `web_search_options`, and `x_search` stay fail closed.
 - Not available on this route: xAI `x_search`.
 - Not implemented: OpenAI `file_search` and `computer`. Hosted `web_search`
   is opt-in via `HOSTED_SEARCH_MODE=auto`.

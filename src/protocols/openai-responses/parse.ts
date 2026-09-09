@@ -383,6 +383,17 @@ function parseInput(input: unknown): {
       pushMessage({ role: "user", content: raw.text });
       continue;
     }
+    if (type === "agent_message") {
+      flushAssistant();
+      // Codex sub-agent replay; backend ciphertext parts cannot be decrypted off-platform.
+      const content = Array.isArray(raw.content)
+        ? raw.content.map((part) => (part as Record<string, unknown> | null)?.type === "encrypted_content"
+          ? { type: "input_text", text: "[encrypted sub-agent payload omitted]" }
+          : part)
+        : raw.content;
+      pushMessage(parseUserItem({ ...raw, content }));
+      continue;
+    }
     if (type === "message" || type === "easy_input_message") {
       flushAssistant();
       const before = messages.length;

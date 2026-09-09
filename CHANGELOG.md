@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- `/v1/responses` accepts Codex `agent_message` input items as user turns; `encrypted_content` parts degrade to a placeholder instead of returning 400 `unsupported input item type: agent_message`.
+- `HOSTED_SEARCH_MODE=auto` accepts a hosted `web_search` tool that carries Codex filter fields (`user_location`, `search_context_size`, `external_web_access`) and ignores them instead of returning 400 `web_search filters are not supported`. Required/named choice, Chat `web_search_options`, and `x_search` stay 4xx.
+
 ## 0.4.0
 
 - Fix GitHub Issue #25: Anthropic SSE in-stream errors now close open blocks, emit `message_delta` + `message_stop`, then one public `error`, without a second handler write.

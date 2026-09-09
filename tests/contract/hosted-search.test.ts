@@ -13,7 +13,7 @@ test("hosted search stays fail closed by default", () => {
   ).toThrow(/web_search is not supported/);
 });
 
-test("HOSTED_SEARCH_MODE=auto accepts a bare web_search tool and rejects filters, required, named, and Chat options", () => {
+test("HOSTED_SEARCH_MODE=auto accepts a web_search tool and rejects required, named, and Chat options", () => {
   const parsed = parseResponsesRequest(
     {
       model: "composer-2.5",
@@ -26,16 +26,20 @@ test("HOSTED_SEARCH_MODE=auto accepts a bare web_search tool and rejects filters
   expect(parsed.parsed.tools.some((tool) => tool.name === "lookup")).toBe(true);
   expect(parsed.parsed.tools.some((tool) => tool.name === "web_search")).toBe(false);
 
-  expect(() =>
-    parseResponsesRequest(
-      {
-        model: "composer-2.5",
-        input: "search",
-        tools: [{ type: "web_search", user_location: { type: "approximate" } }],
-      },
-      { hostedSearchMode: "auto" },
-    ),
-  ).toThrow(/filters are not supported/);
+  const withFilters = parseResponsesRequest(
+    {
+      model: "composer-2.5",
+      input: "search",
+      tools: [{
+        type: "web_search",
+        external_web_access: true,
+        search_context_size: "medium",
+        user_location: { type: "approximate" },
+      }],
+    },
+    { hostedSearchMode: "auto" },
+  );
+  expect(withFilters.parsed.hostedSearch).toBe(true);
 
   expect(() =>
     parseResponsesRequest(
@@ -83,7 +87,12 @@ test("auto hosted search enables SDK webSearch allowlist on a live request", asy
       body: JSON.stringify({
         model: "composer-2.5",
         input: "search the web",
-        tools: [{ type: "web_search" }],
+        tools: [{
+          type: "web_search",
+          external_web_access: true,
+          search_context_size: "medium",
+          user_location: { type: "approximate" },
+        }],
       }),
     });
     expect(res.status).toBe(200);

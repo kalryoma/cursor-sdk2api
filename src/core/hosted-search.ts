@@ -17,10 +17,7 @@ export function assertHostedSearchRequest(raw: Record<string, unknown>, mode: Ho
   if (mode !== "auto") {
     throw invalidRequest("web_search is not supported");
   }
-  const extra = Object.keys(raw).filter((key) => key !== "type");
-  if (extra.length > 0) {
-    throw invalidRequest("web_search filters are not supported");
-  }
+  // ponytail: Codex always sends location/filters; Cursor webSearch has no filter surface.
 }
 
 export function assertHostedSearchToolChoice(hostedSearch: boolean, toolChoice: ToolChoicePolicy): void {

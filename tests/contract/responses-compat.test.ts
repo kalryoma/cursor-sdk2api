@@ -55,6 +55,31 @@ test("unknown text formats fail closed instead of disappearing", () => {
   })).toThrowError(/text.format.type must be/);
 });
 
+test("agent_message replays as a user turn with ciphertext parts degraded", () => {
+  const parsed = parseResponsesRequest({
+    model: "composer-2.5",
+    input: [
+      {
+        type: "agent_message",
+        author: "/root/child",
+        recipient: "/root",
+        content: [
+          { type: "input_text", text: "Message Type: FINAL_ANSWER" },
+          { type: "encrypted_content", encrypted_content: "gAAAAAB".padEnd(80, "x") },
+        ],
+      },
+      { type: "message", role: "user", content: "continue" },
+    ],
+  });
+  expect(parsed.parsed.messages[0]).toEqual({
+    role: "user",
+    content: [
+      { type: "text", text: "Message Type: FINAL_ANSWER" },
+      { type: "text", text: "[encrypted sub-agent payload omitted]" },
+    ],
+  });
+});
+
 test("additional_tools function entries join the executable client tool catalog", async () => {
   ctx = await startTestApp({ sdk: { scripts: [[{ type: "text", chunks: ["ok"] }]] } });
   const response = await api(ctx, "/v1/responses", {
