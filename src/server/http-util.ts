@@ -40,6 +40,13 @@ export async function readJsonBody(req: IncomingMessage, maxBytes: number): Prom
   }
 }
 
+export function applyHeaders(res: ServerResponse, headers: Record<string, string>): void {
+  if (typeof res.setHeader !== "function") return;
+  for (const [name, value] of Object.entries(headers)) {
+    res.setHeader(name, value);
+  }
+}
+
 export function sendJson(
   res: ServerResponse,
   status: number,
@@ -49,12 +56,14 @@ export function sendJson(
 ): void {
   if (res.headersSent) return;
   const payload = JSON.stringify(body);
-  res.writeHead(status, {
+  const headers = {
     "content-type": "application/json; charset=utf-8",
     "x-request-id": requestId,
     "cache-control": "no-store",
     ...extraHeaders,
-  });
+  };
+  applyHeaders(res, headers);
+  res.writeHead(status, headers);
   res.end(payload);
 }
 

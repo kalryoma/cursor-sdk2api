@@ -68,3 +68,39 @@ export interface AccountPayload {
 }
 
 export type Protocol = "messages" | "chat" | "responses";
+
+export interface RequestLogUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+  reasoning_tokens?: number;
+  usage_status?: "sdk" | "unavailable" | "deferred";
+}
+
+export interface RequestLogEntry {
+  id: string;
+  started_at: number;
+  finished_at?: number;
+  duration_ms?: number;
+  protocol: Protocol;
+  path: string;
+  method: string;
+  model?: string;
+  stream?: boolean;
+  status: "running" | number;
+  request_id: string;
+  session_id?: string;
+  account_id?: string;
+  key_hint?: string;
+  runtime_profile?: "sdk" | "sand";
+  usage?: RequestLogUsage;
+  error_type?: string;
+  error?: string;
+}
+
+export interface RequestLogsPayload {
+  generated_at: number;
+  total: number;
+  logs: RequestLogEntry[];
+}

@@ -1,4 +1,4 @@
-import type { AccountPayload, HealthPayload, ModelsPayload, Protocol } from "./types.js";
+import type { AccountPayload, HealthPayload, ModelsPayload, Protocol, RequestLogsPayload } from "./types.js";
 
 export interface ManagementAccount {
   id: string;
@@ -10,6 +10,10 @@ export interface ManagementAccount {
 
 export async function getHealth(): Promise<HealthPayload> {
   return getJson<HealthPayload>("/health");
+}
+
+export async function getRequestLogs(limit = 200): Promise<RequestLogsPayload> {
+  return getJson<RequestLogsPayload>(`/v0/management/logs?limit=${limit}`);
 }
 
 export async function getModels(apiKey: string): Promise<ModelsPayload> {

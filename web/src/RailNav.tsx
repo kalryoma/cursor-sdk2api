@@ -8,11 +8,13 @@ export function RailNav({
   gatewayLabel,
   home,
   quota,
+  logs,
   accounts,
   connect,
   playground,
   homeMeta,
   quotaMeta,
+  logsMeta,
   accountsMeta,
   startMeta,
   playMeta,
@@ -24,16 +26,18 @@ export function RailNav({
   gatewayLabel: string;
   home: string;
   quota: string;
+  logs: string;
   accounts: string;
   connect: string;
   playground: string;
   homeMeta: string;
   quotaMeta: string;
+  logsMeta: string;
   accountsMeta: string;
   startMeta: string;
   playMeta: string;
   accountCount: number;
-  icons: Record<"home" | "quota" | "key" | "start" | "play", ReactNode>;
+  icons: Record<"home" | "quota" | "logs" | "key" | "start" | "play", ReactNode>;
 }) {
   const navRef = useRef<HTMLElement>(null);
   const [bar, setBar] = useState({ top: 0, height: 0, ready: false });
@@ -61,7 +65,7 @@ export function RailNav({
       observer.disconnect();
       window.removeEventListener("resize", measure);
     };
-  }, [current, accountCount, home, quota, accounts, connect, playground]);
+  }, [current, accountCount, home, quota, logs, accounts, connect, playground]);
 
   return (
     <nav ref={navRef} className="rail-nav" aria-label="cursor-sdk2api">
@@ -75,6 +79,7 @@ export function RailNav({
         <div role="group" aria-labelledby="nav-operate">
           <a href={hrefFor("home")} title={homeMeta} aria-current={current === "home" ? "page" : undefined}>{icons.home}{home}</a>
           <a href={hrefFor("quota")} title={quotaMeta} aria-current={current === "quota" ? "page" : undefined}>{icons.quota}{quota}</a>
+          <a href={hrefFor("logs")} title={logsMeta} aria-current={current === "logs" ? "page" : undefined}>{icons.logs}{logs}</a>
         </div>
       </div>
       <div className="nav-block">
