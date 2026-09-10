@@ -1,17 +1,19 @@
 import type { ServerResponse } from "node:http";
-import { writeSse } from "../../server/http-util.js";
+import { applyHeaders, writeSse } from "../../server/http-util.js";
 import { encodeMessage, encodeUsage } from "./encode.js";
 import type { AssistantTurn, ToolUseBlock } from "./types.js";
 
 export function beginSse(res: ServerResponse, requestId: string, sessionId?: string): void {
-  res.writeHead(200, {
+  const headers = {
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-cache, no-transform",
     connection: "keep-alive",
     "x-request-id": requestId,
     "x-accel-buffering": "no",
     ...(sessionId ? { "x-cursor-session-id": sessionId } : {}),
-  });
+  };
+  applyHeaders(res, headers);
+  res.writeHead(200, headers);
 }
 
 export function writeMessageStart(res: ServerResponse, turn: Pick<AssistantTurn, "messageId" | "model" | "sessionId">): void {

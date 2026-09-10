@@ -23,6 +23,13 @@ import type { PumpBoundary } from "../core/event-pump.js";
 import { SystemPromptGate } from "../core/system-prompt-gate.js";
 import { LineageStore } from "../core/lineage-store.js";
 import { OrdinaryTurnJournal } from "../core/ordinary-turn-journal.js";
+import {
+  publicKeyHint,
+  RequestLog,
+  type RequestLogBegin,
+  type RequestLogFinish,
+  type RequestLogUsage,
+} from "../core/request-log.js";
 import { RuntimeLedger } from "../core/runtime-ledger.js";
 import { inspectSandLoader, type SandLoaderHealth } from "../sdk/sand-loader.js";
 import { SessionRegistry } from "../core/session-registry.js";
@@ -185,6 +192,61 @@ export function createApp(input: {
   });
   const catalog = new ModelCatalog(sdk, clock, config.catalogCacheMs);
   const accounts = new CursorAccountFileStore(config.stateDir, config.managedCursorKey);
+  const requestLog = new RequestLog(clock);
+
+  const responseHeader = (res: ServerResponse, name: string): string | undefined => {
+    const value = res.getHeader(name);
+    if (Array.isArray(value)) return typeof value[0] === "string" ? value[0] : undefined;
+    return typeof value === "string" ? value : undefined;
+  };
+
+  const usageFromSession = (sessionId?: string): RequestLogUsage | undefined => {
+    if (!sessionId) return undefined;
+    const usage = registry.get(sessionId)?.replay?.turn.usage;
+    if (!usage) return undefined;
+    const out: RequestLogUsage = {
+      input_tokens: usage.input_tokens,
+      output_tokens: usage.output_tokens,
+    };
+    if (usage.cache_creation_input_tokens != null) out.cache_creation_input_tokens = usage.cache_creation_input_tokens;
+    if (usage.cache_read_input_tokens != null) out.cache_read_input_tokens = usage.cache_read_input_tokens;
+    if (usage.reasoning_tokens != null) out.reasoning_tokens = usage.reasoning_tokens;
+    if (usage.usage_status) out.usage_status = usage.usage_status;
+    return out;
+  };
+
+  const finishRequestLog = (
+    id: string,
+    res: ServerResponse,
+    error?: unknown,
+    extra: RequestLogFinish = {},
+  ) => {
+    const sessionId = extra.session_id ?? responseHeader(res, "x-cursor-session-id");
+    const session = sessionId ? registry.get(sessionId) : undefined;
+    const stored = session ? accounts.findByFingerprint(session.credentialFingerprint) : undefined;
+    const status = extra.status
+      ?? (error instanceof GatewayError
+        ? error.httpStatus
+        : error
+          ? (res.headersSent ? res.statusCode || 502 : 502)
+          : (res.statusCode || 200));
+    requestLog.finish(id, {
+      status,
+      session_id: sessionId,
+      account_id: extra.account_id ?? stored?.id,
+      key_hint: extra.key_hint ?? stored?.keyHint,
+      runtime_profile: extra.runtime_profile ?? session?.runtimeProfile,
+      model: extra.model,
+      stream: extra.stream,
+      usage: extra.usage ?? usageFromSession(sessionId),
+      error_type: extra.error_type ?? (
+        error instanceof GatewayError ? error.code : error ? "cursor_upstream_error" : undefined
+      ),
+      error: extra.error ?? (error
+        ? redactSecrets(error instanceof Error ? error.message : String(error ?? "Unexpected error"))
+        : undefined),
+    });
+  };
   const accountPool = new CursorAccountPool();
   const accountPayload = (apiKey: string, defaultProfile?: RuntimeProfile) =>
     readAccount(sdk, apiKey, {
@@ -392,6 +454,36 @@ export function createApp(input: {
     const requestId = headerValue(req, "x-request-id") || newRequestId();
     const path = requestPath(req);
     const method = (req.method ?? "GET").toUpperCase();
+    const withRequestLog = async (
+      meta: RequestLogBegin,
+      work: (logId: string) => Promise<void>,
+    ): Promise<void> => {
+      const entry = requestLog.begin(meta);
+      try {
+        await work(entry.id);
+        finishRequestLog(entry.id, res);
+      } catch (error) {
+        finishRequestLog(entry.id, res, error);
+        throw error;
+      }
+    };
+    const rememberAccount = (logId: string, client: ClientAuthorization, auth: AuthContext) => {
+      const stored = accounts.findByFingerprint(auth.fingerprint);
+      let profile: RuntimeProfile | undefined;
+      try {
+        profile = runtimeProfileFor(req, client, auth);
+      } catch {
+        profile = auth.defaultProfile;
+      }
+      requestLog.patch(logId, {
+        ...(stored
+          ? { account_id: stored.id, key_hint: stored.keyHint }
+          : client.mode === "byok"
+            ? { key_hint: publicKeyHint(client.auth.cursorApiKey) }
+            : {}),
+        ...(profile ? { runtime_profile: profile } : {}),
+      });
+    };
     try {
       if (
         (method === "GET" || method === "HEAD") &&
@@ -457,6 +549,25 @@ export function createApp(input: {
         return;
       }
 
+      if (path === "/v0/management/logs" && method === "GET") {
+        const raw = new URL(req.url ?? "/", "http://localhost").searchParams.get("limit");
+        const limit = raw == null || raw === "" ? 200 : Number(raw);
+        if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
+          throw invalidRequest("limit is invalid");
+        }
+        sendJson(
+          res,
+          200,
+          {
+            generated_at: clock.now(),
+            total: requestLog.size,
+            logs: requestLog.list(limit),
+          },
+          requestId,
+        );
+        return;
+      }
+
       if (path === "/v0/management/accounts/probe" && method === "GET") {
         const id = new URL(req.url ?? "/", "http://localhost").searchParams.get("id")?.trim() ?? "";
         if (!id) throw invalidRequest("id is required");
@@ -499,33 +610,53 @@ export function createApp(input: {
         const stored = accounts.get(id);
         if (!stored) throw notFound("Persistent account was not found");
         if (!body || body.request === undefined) throw invalidRequest("request is required");
-        const auth = managedAccountAuth(stored.apiKey, stored.defaultProfile);
-        if (protocol === "messages") {
-          const parsed = parseMessagesRequest(body.request);
-          await coordinator.handleMessages(req, res, auth, parsed, requestId);
-          return;
+        if (protocol !== "messages" && protocol !== "chat" && protocol !== "responses") {
+          throw invalidRequest("protocol must be messages, chat, or responses");
         }
-        if (protocol === "chat") {
-          const chat = parseChatCompletionsRequest(body.request);
+        const auth = managedAccountAuth(stored.apiKey, stored.defaultProfile);
+        await withRequestLog({
+          protocol,
+          path,
+          method,
+          request_id: requestId,
+          account_id: stored.id,
+          key_hint: stored.keyHint,
+        }, async (logId) => {
+          if (protocol === "messages") {
+            const parsed = parseMessagesRequest(body.request);
+            requestLog.patch(logId, { model: parsed.model, stream: parsed.stream });
+            await coordinator.handleMessages(req, res, auth, parsed, requestId);
+            return;
+          }
+          if (protocol === "chat") {
+            const chat = parseChatCompletionsRequest(body.request);
+            requestLog.patch(logId, { model: chat.parsed.model, stream: chat.parsed.stream });
+            await coordinator.handleMessages(
+              req,
+              res,
+              auth,
+              chat.parsed,
+              requestId,
+              undefined,
+              createChatWriterFactory({ includeUsage: chat.includeUsage }),
+            );
+            return;
+          }
+          const responses = parseResponsesRequest(body.request, {
+            hostedSearchMode: config.runtimePolicy.hostedSearchMode,
+          });
+          requestLog.patch(logId, { model: responses.parsed.model, stream: responses.parsed.stream });
           await coordinator.handleMessages(
             req,
             res,
             auth,
-            chat.parsed,
+            responses.parsed,
             requestId,
             undefined,
-            createChatWriterFactory({ includeUsage: chat.includeUsage }),
+            createResponsesWriterFactory(),
           );
-          return;
-        }
-        if (protocol === "responses") {
-        const responses = parseResponsesRequest(body.request, {
-          hostedSearchMode: config.runtimePolicy.hostedSearchMode,
         });
-          await coordinator.handleMessages(req, res, auth, responses.parsed, requestId, undefined, createResponsesWriterFactory());
-          return;
-        }
-        throw invalidRequest("protocol must be messages, chat, or responses");
+        return;
       }
 
       if (path === "/v0/management/accounts/default_profile" && method === "PUT") {
@@ -661,45 +792,128 @@ export function createApp(input: {
       }
 
       if (method === "POST" && path === "/v1/messages") {
-        const client = authorizeClient(req, config);
-        const body = await readJsonBody(req, config.maxBodyBytes);
-        if (body === undefined) throw invalidRequest("JSON body is required");
-        const parsed = parseMessagesRequest(body);
-        const sessionHint = headerValue(req, "x-cursor-session-id");
-        await runWithProviderRecovery(res, client, parsed, sessionHint, (auth) =>
-          coordinator.handleMessages(req, res, auth, parsed, requestId, sessionHint));
+        await withRequestLog({ protocol: "messages", path, method, request_id: requestId }, async (logId) => {
+          const client = authorizeClient(req, config);
+          if (client.mode === "byok") {
+            requestLog.patch(logId, { key_hint: publicKeyHint(client.auth.cursorApiKey) });
+          }
+          const body = await readJsonBody(req, config.maxBodyBytes);
+          if (body === undefined) throw invalidRequest("JSON body is required");
+          const parsed = parseMessagesRequest(body);
+          requestLog.patch(logId, { model: parsed.model, stream: parsed.stream });
+          const sessionHint = headerValue(req, "x-cursor-session-id");
+          await runWithProviderRecovery(res, client, parsed, sessionHint, (auth) => {
+            rememberAccount(logId, client, auth);
+            return coordinator.handleMessages(req, res, auth, parsed, requestId, sessionHint);
+          });
+        });
         return;
       }
 
       if (method === "POST" && path === "/v1/chat/completions") {
-        const client = authorizeClient(req, config);
-        const body = await readJsonBody(req, config.maxBodyBytes);
-        if (body === undefined) throw invalidRequest("JSON body is required");
-        const chat = parseChatCompletionsRequest(body);
-        const sessionHint = headerValue(req, "x-cursor-session-id");
-        await runWithProviderRecovery(res, client, chat.parsed, sessionHint, (auth) =>
-          coordinator.handleMessages(
-            req,
-            res,
-            auth,
-            chat.parsed,
-            requestId,
-            sessionHint,
-            createChatWriterFactory({ includeUsage: chat.includeUsage }),
-          ));
+        await withRequestLog({ protocol: "chat", path, method, request_id: requestId }, async (logId) => {
+          const client = authorizeClient(req, config);
+          if (client.mode === "byok") {
+            requestLog.patch(logId, { key_hint: publicKeyHint(client.auth.cursorApiKey) });
+          }
+          const body = await readJsonBody(req, config.maxBodyBytes);
+          if (body === undefined) throw invalidRequest("JSON body is required");
+          const chat = parseChatCompletionsRequest(body);
+          requestLog.patch(logId, { model: chat.parsed.model, stream: chat.parsed.stream });
+          const sessionHint = headerValue(req, "x-cursor-session-id");
+          await runWithProviderRecovery(res, client, chat.parsed, sessionHint, (auth) => {
+            rememberAccount(logId, client, auth);
+            return coordinator.handleMessages(
+              req,
+              res,
+              auth,
+              chat.parsed,
+              requestId,
+              sessionHint,
+              createChatWriterFactory({ includeUsage: chat.includeUsage }),
+            );
+          });
+        });
         return;
       }
 
       if (method === "POST" && path === "/v1/responses") {
-        const client = authorizeClient(req, config);
-        const body = await readJsonBody(req, config.maxBodyBytes);
-        if (body === undefined) throw invalidRequest("JSON body is required");
-        const responses = parseResponsesRequest(body, {
-          hostedSearchMode: config.runtimePolicy.hostedSearchMode,
+        await withRequestLog({ protocol: "responses", path, method, request_id: requestId }, async (logId) => {
+          const client = authorizeClient(req, config);
+          if (client.mode === "byok") {
+            requestLog.patch(logId, { key_hint: publicKeyHint(client.auth.cursorApiKey) });
+          }
+          const body = await readJsonBody(req, config.maxBodyBytes);
+          if (body === undefined) throw invalidRequest("JSON body is required");
+          const responses = parseResponsesRequest(body, {
+            hostedSearchMode: config.runtimePolicy.hostedSearchMode,
+          });
+          requestLog.patch(logId, { model: responses.parsed.model, stream: responses.parsed.stream });
+          const sessionHint = headerValue(req, "x-cursor-session-id");
+          if (responses.compaction.trigger) {
+            const auth = await resolveAuth(client, responses.parsed, sessionHint);
+            rememberAccount(logId, client, auth);
+            const minted = mintLocalCompact({
+              store: compactStore,
+              account: auth.fingerprint,
+              profile: runtimeProfileFor(req, client, auth),
+              parsed: responses,
+              sessionHint,
+            });
+            writeLocalCompactResponse({
+              res,
+              clock,
+              requestId,
+              stream: responses.parsed.stream,
+              model: responses.parsed.model,
+              token: minted.token,
+              compactId: minted.record.compactId,
+              sessionId: sessionHint,
+            });
+            return;
+          }
+          await runWithProviderRecovery(res, client, responses.parsed, sessionHint, (auth) => {
+            rememberAccount(logId, client, auth);
+            let hint = sessionHint;
+            if (responses.compaction.encryptedContent) {
+              const bound = bindCompactContinuation({
+                store: compactStore,
+                token: responses.compaction.encryptedContent,
+                account: auth.fingerprint,
+                profile: runtimeProfileFor(req, client, auth),
+                parsed: responses,
+              });
+              hint = sessionHint ?? bound.sessionId;
+            }
+            return coordinator.handleMessages(
+              req,
+              res,
+              auth,
+              responses.parsed,
+              requestId,
+              hint,
+              createResponsesWriterFactory(),
+            );
+          });
         });
-        const sessionHint = headerValue(req, "x-cursor-session-id");
-        if (responses.compaction.trigger) {
+        return;
+      }
+
+      if (method === "POST" && path === "/v1/responses/compact") {
+        await withRequestLog({ protocol: "responses", path, method, request_id: requestId }, async (logId) => {
+          const client = authorizeClient(req, config);
+          if (client.mode === "byok") {
+            requestLog.patch(logId, { key_hint: publicKeyHint(client.auth.cursorApiKey) });
+          }
+          const body = await readJsonBody(req, config.maxBodyBytes);
+          if (body === undefined) throw invalidRequest("JSON body is required");
+          const responses = parseResponsesRequest(body, {
+            hostedSearchMode: config.runtimePolicy.hostedSearchMode,
+          });
+          requestLog.patch(logId, { model: responses.parsed.model, stream: responses.parsed.stream });
+          const sessionHint = headerValue(req, "x-cursor-session-id");
           const auth = await resolveAuth(client, responses.parsed, sessionHint);
+          rememberAccount(logId, client, auth);
           const minted = mintLocalCompact({
             store: compactStore,
             account: auth.fingerprint,
@@ -717,58 +931,6 @@ export function createApp(input: {
             compactId: minted.record.compactId,
             sessionId: sessionHint,
           });
-          return;
-        }
-        await runWithProviderRecovery(res, client, responses.parsed, sessionHint, (auth) => {
-          let hint = sessionHint;
-          if (responses.compaction.encryptedContent) {
-            const bound = bindCompactContinuation({
-              store: compactStore,
-              token: responses.compaction.encryptedContent,
-              account: auth.fingerprint,
-              profile: runtimeProfileFor(req, client, auth),
-              parsed: responses,
-            });
-            hint = sessionHint ?? bound.sessionId;
-          }
-          return coordinator.handleMessages(
-            req,
-            res,
-            auth,
-            responses.parsed,
-            requestId,
-            hint,
-            createResponsesWriterFactory(),
-          );
-        });
-        return;
-      }
-
-      if (method === "POST" && path === "/v1/responses/compact") {
-        const client = authorizeClient(req, config);
-        const body = await readJsonBody(req, config.maxBodyBytes);
-        if (body === undefined) throw invalidRequest("JSON body is required");
-        const responses = parseResponsesRequest(body, {
-          hostedSearchMode: config.runtimePolicy.hostedSearchMode,
-        });
-        const sessionHint = headerValue(req, "x-cursor-session-id");
-        const auth = await resolveAuth(client, responses.parsed, sessionHint);
-        const minted = mintLocalCompact({
-          store: compactStore,
-          account: auth.fingerprint,
-          profile: runtimeProfileFor(req, client, auth),
-          parsed: responses,
-          sessionHint,
-        });
-        writeLocalCompactResponse({
-          res,
-          clock,
-          requestId,
-          stream: responses.parsed.stream,
-          model: responses.parsed.model,
-          token: minted.token,
-          compactId: minted.record.compactId,
-          sessionId: sessionHint,
         });
         return;
       }

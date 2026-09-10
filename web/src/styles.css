@@ -602,6 +602,50 @@ html[lang="zh-CN"] .page-head h1 { letter-spacing: 0; }
 .grid-table tbody tr {
   transition: background-color var(--motion-fast) ease;
 }
+.grid-table tbody tr.log-row { cursor: pointer; }
+
+.log-auto {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--mute);
+}
+.log-auto input {
+  appearance: auto;
+  width: 14px;
+  height: 14px;
+}
+
+.log-modal {
+  width: min(720px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  padding: 20px;
+  border: 1px solid var(--hair);
+  background: var(--paper);
+  color: var(--ink);
+  overflow: auto;
+}
+.log-modal::backdrop {
+  background: color-mix(in srgb, var(--ink) 45%, transparent);
+}
+.log-modal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.log-modal-head h2 { font-size: 18px; }
+.log-raw {
+  margin: 0;
+  max-height: 50vh;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 @media (hover: hover) {
   .grid-table tbody tr:hover { background: var(--hover); }
 }

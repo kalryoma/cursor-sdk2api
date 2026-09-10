@@ -16,6 +16,7 @@ import { AccountsPage } from "./pages/AccountsPage";
 import { ConnectPage } from "./pages/ConnectPage";
 import type { RecipeName } from "./recipes";
 import { HomePage, type HomeCopy } from "./pages/HomePage";
+import { LogsPage } from "./pages/LogsPage";
 import { PlaygroundPage } from "./pages/PlaygroundPage";
 import { QuotaPage } from "./pages/QuotaPage";
 import { BFTheme } from "./bflabs/BFTheme";
@@ -39,11 +40,13 @@ const COPY = {
     navStart: "Quick start",
     navAccounts: "Accounts",
     navQuota: "Quota",
+    navLogs: "Logs",
     navPlay: "Playground",
     navHomeMeta: "Runtime and API URLs",
     navStartMeta: "Client recipes",
     navAccountsMeta: "Persistent credentials",
     navQuotaMeta: "Cursor dashboard usage",
+    navLogsMeta: "Protocol request history",
     navPlayMeta: "Messages / Chat / Responses",
     consoleTag: "Local console",
     ready: "Ready",
@@ -204,6 +207,40 @@ const COPY = {
       workspaceBody:
         "Grok Build and Claude Code edit files with their own local tools in your project directory. This gateway only runs the model. Cursor SDK uses an empty workspace, so the model may emit that absolute path. Use a relative path or your project path.",
     },
+    logs: {
+      kicker: "Live requests",
+      title: "Logs",
+      autoRefresh: "Auto-refresh",
+      refresh: "Refresh",
+      refreshing: "Refreshing",
+      empty: "No protocol requests yet.",
+      error: "Could not load logs.",
+      running: "Running",
+      details: "Details",
+      detail: "Detail",
+      raw: "Raw JSON",
+      close: "Close",
+      headers: ["Time", "Protocol", "Model", "Status", "Duration", "Tokens", "Account", "Request"] as [
+        string, string, string, string, string, string, string, string,
+      ],
+      fieldTime: "Time",
+      fieldProtocol: "Protocol",
+      fieldModel: "Model",
+      fieldStatus: "Status",
+      fieldDuration: "Duration",
+      fieldTokens: "Tokens",
+      fieldAccount: "Account",
+      fieldRequest: "Request",
+      fieldSession: "Session",
+      fieldPath: "Path",
+      fieldMethod: "Method",
+      fieldStream: "Stream",
+      fieldProfile: "Runtime",
+      fieldError: "Error",
+      fieldErrorType: "Error type",
+      yes: "Yes",
+      no: "No",
+    },
     keyNeeded: "Paste a Cursor API key first.",
   },
   zh: {
@@ -216,11 +253,13 @@ const COPY = {
     navStart: "快速开始",
     navAccounts: "账号",
     navQuota: "配额",
+    navLogs: "日志",
     navPlay: "协议试跑",
     navHomeMeta: "运行控制和 API 地址",
     navStartMeta: "客户端配方",
     navAccountsMeta: "持久化凭证",
     navQuotaMeta: "官方限额",
+    navLogsMeta: "协议请求记录",
     navPlayMeta: "Messages / Chat / Responses",
     consoleTag: "本机控制台",
     ready: "就绪",
@@ -380,6 +419,40 @@ const COPY = {
       workspaceTitle: "本地文件",
       workspaceBody:
         "Grok Build / Claude Code 改文件用的是它们自己的本机工具，工作区是你的项目目录。这个网关只提供模型推理。Cursor SDK 的 cwd 是空目录，所以模型有时会吐出网关绝对路径。写相对路径或你的项目路径就能改本地文件。",
+    },
+    logs: {
+      kicker: "实时请求",
+      title: "日志",
+      autoRefresh: "自动刷新",
+      refresh: "刷新",
+      refreshing: "刷新中",
+      empty: "还没有协议请求。",
+      error: "日志加载失败。",
+      running: "进行中",
+      details: "详情",
+      detail: "明细",
+      raw: "原始 JSON",
+      close: "关闭",
+      headers: ["时间", "协议", "模型", "状态", "耗时", "Tokens", "账号", "请求"] as [
+        string, string, string, string, string, string, string, string,
+      ],
+      fieldTime: "时间",
+      fieldProtocol: "协议",
+      fieldModel: "模型",
+      fieldStatus: "状态",
+      fieldDuration: "耗时",
+      fieldTokens: "Tokens",
+      fieldAccount: "账号",
+      fieldRequest: "请求",
+      fieldSession: "会话",
+      fieldPath: "路径",
+      fieldMethod: "方法",
+      fieldStream: "流式",
+      fieldProfile: "运行方式",
+      fieldError: "错误",
+      fieldErrorType: "错误类型",
+      yes: "是",
+      no: "否",
     },
     keyNeeded: "先粘贴一把 Cursor Key。",
   },
@@ -655,11 +728,13 @@ export function App() {
           gatewayLabel={t.groupGateway}
           home={t.navHome}
           quota={t.navQuota}
+          logs={t.navLogs}
           accounts={t.navAccounts}
           connect={t.navStart}
           playground={t.navPlay}
           homeMeta={t.navHomeMeta}
           quotaMeta={t.navQuotaMeta}
+          logsMeta={t.navLogsMeta}
           accountsMeta={t.navAccountsMeta}
           startMeta={t.navStartMeta}
           playMeta={t.navPlayMeta}
@@ -667,6 +742,7 @@ export function App() {
           icons={{
             home: <NavIcon name="home" />,
             quota: <NavIcon name="quota" />,
+            logs: <NavIcon name="logs" />,
             key: <NavIcon name="key" />,
             start: <NavIcon name="start" />,
             play: <NavIcon name="play" />,
@@ -761,6 +837,9 @@ export function App() {
         {route.page === "connect" ? (
           <ConnectPage t={t.connect} origin={origin} copied={copied} recipe={recipe} snippets={snippets} routes={clientRoutes} onCopy={copyValue} onRecipe={setRecipe} />
         ) : null}
+        {route.page === "logs" ? (
+          <LogsPage t={t.logs} locale={language} />
+        ) : null}
       </main>
       <footer className="foot">
         <span>BF Labs · MIT · {protocolSummary}</span>
@@ -775,6 +854,7 @@ function pageLabelFor(page: Route["page"], t: (typeof COPY)["en"] | (typeof COPY
   if (page === "connect") return t.navStart;
   if (page === "accounts" || page === "account") return t.navAccounts;
   if (page === "quota") return t.navQuota;
+  if (page === "logs") return t.navLogs;
   if (page === "playground") return t.navPlay;
   return t.navHome;
 }
@@ -783,17 +863,19 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : "Request failed";
 }
 
-function NavIcon({ name }: { name: "home" | "quota" | "key" | "start" | "play" }) {
+function NavIcon({ name }: { name: "home" | "quota" | "logs" | "key" | "start" | "play" }) {
   const d =
     name === "home"
       ? "M3 10.5 12 3l9 7.5V21H14V14H10v7H3Z"
       : name === "quota"
         ? "M12 3a9 9 0 1 0 9 9h-4a5 5 0 1 1-5-5V3Zm1 1.1V11h6.9A8 8 0 0 0 13 4.1Z"
-        : name === "key"
-          ? "M8 14a5 5 0 1 1 4.9-6H21v3h-2v3h-3v2h-3.1A5 5 0 0 1 8 14Zm0-3a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"
-          : name === "start"
-            ? "M8 5v14l11-7Z"
-            : "M4 5h10v4H8v6h6v4H4Zm12 3 5 4-5 4Z";
+        : name === "logs"
+          ? "M5 4h14v16H5V4Zm2 4h10M7 12h10M7 16h6"
+          : name === "key"
+            ? "M8 14a5 5 0 1 1 4.9-6H21v3h-2v3h-3v2h-3.1A5 5 0 0 1 8 14Zm0-3a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"
+            : name === "start"
+              ? "M8 5v14l11-7Z"
+              : "M4 5h10v4H8v6h6v4H4Zm12 3 5 4-5 4Z";
   return (
     <svg className="nav-ico" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
       <path fill="currentColor" d={d} />

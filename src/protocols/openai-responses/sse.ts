@@ -1,18 +1,20 @@
 import type { ServerResponse } from "node:http";
 import { toOpenAIErrorBody } from "../../errors.js";
-import { writeSse } from "../../server/http-util.js";
+import { applyHeaders, writeSse } from "../../server/http-util.js";
 
 const nextSequenceByResponse = new WeakMap<ServerResponse, number>();
 
 export function beginResponsesSse(res: ServerResponse, requestId: string, sessionId: string): void {
-  res.writeHead(200, {
+  const headers = {
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-cache, no-transform",
     connection: "keep-alive",
     "x-request-id": requestId,
     "x-accel-buffering": "no",
     "x-cursor-session-id": sessionId,
-  });
+  };
+  applyHeaders(res, headers);
+  res.writeHead(200, headers);
 }
 
 export function writeResponsesEvent(

@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { protocolEndpoint, runPrompt } from "../../web/src/api.js";
+import { getRequestLogs, protocolEndpoint, runPrompt } from "../../web/src/api.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -74,4 +74,16 @@ test("operator console renders Responses SSE bytes incrementally", async () => {
   expect(snapshots.length).toBeGreaterThanOrEqual(2);
   expect(snapshots.at(-1)).toContain("response.created");
   expect(snapshots.at(-1)).toContain("response.completed");
+});
+
+test("operator console fetches the request log ring", async () => {
+  const fetchMock = vi.fn(async () =>
+    new Response(JSON.stringify({ generated_at: 1, total: 0, logs: [] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  await expect(getRequestLogs(50)).resolves.toEqual({ generated_at: 1, total: 0, logs: [] });
+  expect(fetchMock).toHaveBeenCalledWith("/v0/management/logs?limit=50", { headers: undefined });
 });
