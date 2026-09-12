@@ -169,6 +169,38 @@ test("stream lifecycle uses Responses event names and ends with response.complet
   });
 });
 
+test("stream response.completed rides turn-ended with its usage while the run is still winding down", async () => {
+  ctx = await startTestApp({
+    sdk: {
+      finalUsage: { inputTokens: 21, outputTokens: 4, cacheReadTokens: 5, reasoningTokens: 2 },
+      scripts: [[{ type: "text", chunks: ["PONG"] }, { type: "wind-down", ms: 600 }]],
+    },
+  });
+  const started = Date.now();
+  const res = await api(ctx, "/v1/responses", {
+    method: "POST",
+    body: JSON.stringify({ model: "composer-2.5", stream: true, input: "ping" }),
+  });
+  const events = parseSse(await res.text());
+  const elapsedMs = Date.now() - started;
+  expect(elapsedMs).toBeLessThan(450);
+  expect(events.at(-1)?.event).toBe("response.completed");
+  const completed = events.at(-1)?.data;
+  const response = isRecord(completed) ? (completed.response as Record<string, unknown>) : {};
+  expect(response.status).toBe("completed");
+  expect(outputOfType({ output: response.output as unknown[] }, "message")[0]).toMatchObject({
+    content: [{ type: "output_text", text: "PONG" }],
+  });
+  expect(response.usage).toMatchObject({
+    input_tokens: 21,
+    output_tokens: 4,
+    total_tokens: 25,
+    input_tokens_details: { cached_tokens: 5 },
+    output_tokens_details: { reasoning_tokens: 2 },
+  });
+  expect(ctx.sdk.agents[0]?.runs[0]?.waitCalls ?? 0).toBe(0);
+});
+
 test("single function_call continuation stays on the same SDK run", async () => {
   ctx = await startTestApp({
     sdk: {

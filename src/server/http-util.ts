@@ -76,9 +76,9 @@ export function sendOpenAIError(res: ServerResponse, error: unknown, requestId: 
   sendJson(res, httpStatusOf(error), toOpenAIErrorBody(error, requestId), requestId);
 }
 
+/** One write per event so each SSE frame leaves as one chunk. */
 export function writeSse(res: ServerResponse, event: string, data: unknown): void {
-  res.write(`event: ${event}\n`);
-  res.write(`data: ${JSON.stringify(data)}\n\n`);
+  res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
 /** SSE comment line; parsers skip it, proxies and clients see traffic. */

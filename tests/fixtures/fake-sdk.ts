@@ -32,8 +32,14 @@ export type FakeStep =
       trailingTextDelayMs?: number;
       /** Offsets (ms from step start) at which a token-delta shows the model still generating. */
       activity?: number[];
+      /** Emit `tool-call-announced` this long before each call's execute, as the SDK streams the call. */
+      announceLeadMs?: number;
+      /** Offset (ms from step start) of the `step-completed` delta that ends the model call. */
+      stepCompletedAfterMs?: number;
     }
   | { type: "silent-final"; text: string }
+  /** Keep the run open this long after `turn-ended` before the stream ends and wait() settles. */
+  | { type: "wind-down"; ms: number }
   | { type: "empty" }
   | { type: "error"; message: string }
   | { type: "send-error"; message: string; name?: string }
@@ -171,13 +177,27 @@ export class FakeRun implements SdkRun {
    */
   private async runToolStep(step: FakeToolStep): Promise<void> {
     const calls = step.calls.map((call) => ({ ...call, id: call.id ?? `sdk_${randomUUID()}` }));
-    const activity = (step.activity ?? []).map((at) =>
+    const timers = (step.activity ?? []).map((at) =>
       setTimeout(() => {
         void this.emitDelta({ type: "token-delta", tokens: 1 });
       }, at),
     );
+    if (step.stepCompletedAfterMs !== undefined) {
+      timers.push(
+        setTimeout(() => {
+          void this.emitDelta({ type: "step-completed", stepId: 1, durationMs: step.stepCompletedAfterMs ?? 0 });
+        }, step.stepCompletedAfterMs),
+      );
+    }
+    const announce = async (call: (typeof calls)[number]) => {
+      if (step.announceLeadMs === undefined) return;
+      const at = Math.max(0, (call.delayMs ?? 0) - step.announceLeadMs);
+      if (at > 0) await new Promise((resolve) => setTimeout(resolve, at));
+      await this.emitDelta({ type: "tool-call-announced", callId: call.id, toolName: call.name });
+    };
     const results = calls.map((call) =>
       (async () => {
+        void announce(call);
         if (call.delayMs) await new Promise((resolve) => setTimeout(resolve, call.delayMs));
         const tool = this.tools[call.name];
         if (!tool) throw new Error(`fake sdk missing tool ${call.name}`);
@@ -201,7 +221,7 @@ export class FakeRun implements SdkRun {
     try {
       await Promise.all(results);
     } finally {
-      for (const timer of activity) clearTimeout(timer);
+      for (const timer of timers) clearTimeout(timer);
     }
   }
 
@@ -280,6 +300,8 @@ export class FakeRun implements SdkRun {
       if (this.onDelta && finalText && this.finalUsage) {
         await this.emitDelta({ type: "turn-ended", usage: this.finalUsage });
       }
+      const windDown = this.script.find((step) => step.type === "wind-down");
+      if (windDown?.type === "wind-down") await new Promise((resolve) => setTimeout(resolve, windDown.ms));
       this.events.end();
     } catch (error) {
       this.result = {
