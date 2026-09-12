@@ -1,8 +1,8 @@
 # Performance diff
 
-## 2026-09-12 — signal-driven close and turn-ended
+## Signal-driven close and turn-ended
 
-Same 11-case `live:timing` suite. **main** `1684b1d` (settle 1500, idle off) vs this PR (idle 200, announce / `step-completed` close, final on `turn-ended`). Both 11/11. Full receipt: [2026-09-12-streaming-responsiveness-diff.md](2026-09-12-streaming-responsiveness-diff.md).
+Same 11-case `live:timing` suite. **main** `1684b1d` (settle 1500, idle off) vs this PR (idle 200, announce / `step-completed` close, final on `turn-ended`). Both 11/11.
 
 **`batch_close_wait_ms`** is the effect: 1500–1502 ms settle on every main tool case → **200–234 ms** idle on the PR. Live `step-completed` did not beat the 200 ms idle in this sample. Sonnet `announce_lead_ms` was 0–2 ms.
 
@@ -41,4 +41,4 @@ Same suite, `TOOL_BATCH_SETTLE_MS=1500`, idle off. Before early tool streaming (
 | Sonnet Chat parallel | 6.00s → 5.65s | 0 → **2450 ms** | 6.00s → 8.10s |
 | Sonnet Responses parallel | 6.48s → 3.55s | 0 → **2055 ms** | 6.48s → 5.61s |
 
-Before, tools landed only in `finish()` (`tool_lead=0`, parallel items as one clump). 1.0.31 writes each item at `execute()`. Text SSE was unchanged. `batch_close_wait_ms` on 1.0.31 was 1500–1503 ms every tool case. That stop wait is what the 2026-09-12 row removes.
+Before, tools landed only in `finish()` (`tool_lead=0`, parallel items as one clump). 1.0.31 writes each item at `execute()`. Text SSE was unchanged. `batch_close_wait_ms` on 1.0.31 was 1500–1503 ms every tool case. That stop wait is what the signal-driven close above removes.
