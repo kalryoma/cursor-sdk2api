@@ -18,7 +18,7 @@ Outer agents (Claude Code, Grok Build) execute their own local file tools in the
 |---|---|---|
 | `GET /console/` | optional | Static BF Labs Operator Console served by the gateway. It manages the persistent Cursor account pool but does not add billing, users, or a second production process. |
 | `POST /v1/messages` non-stream text | yes | Native Anthropic `user`/`assistant` plus sub2api compatibility roles. `system`/`developer` preserve transcript order. Historical `tool`/`function` output is retained; a trailing compatibility tool result needs `tool_call_id`, `call_id`, or `id`. |
-| SSE text / thinking | yes | Incremental `onDelta` (`text-delta` / `thinking-delta`). `run.stream()` is tool/status/terminal. Tool items are written when the SDK requests the tool; stream, non-stream body, replay, and `response.completed.output` share one journal. `SSE_HEARTBEAT_MS` keeps a started stream alive. |
+| SSE text / thinking | yes | Incremental `onDelta` (`text-delta` / `thinking-delta`). `run.stream()` is tool/status/terminal. Tool items are written when the SDK requests the tool; the tool stop follows the SDK's announce / `step-completed` signals with `TOOL_BATCH_IDLE_MS` silence, and the final stop rides `turn-ended`. Stream, non-stream body, replay, and `response.completed.output` share one journal. `SSE_HEARTBEAT_MS` keeps a started stream alive. |
 | images (base64) | yes | Mapped to SDK `images` |
 | client tools | yes | `local.customTools` |
 | parallel tools | yes | One assistant batch |
