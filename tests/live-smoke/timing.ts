@@ -25,6 +25,8 @@ type Protocol = "messages" | "chat" | "responses";
 
 interface Marks {
   first_byte_ms?: number;
+  first_text_ms?: number;
+  last_text_ms?: number;
   tool_items: Array<{ name: string; at_ms: number }>;
   stop_ms?: number;
   stop_reason?: string;
@@ -39,6 +41,8 @@ interface TimingCase {
   http_status?: number;
   duration_ms?: number;
   first_byte_ms?: number;
+  first_text_ms?: number;
+  last_text_ms?: number;
   first_tool_ms?: number;
   last_tool_ms?: number;
   tool_spread_ms?: number;
@@ -47,9 +51,16 @@ interface TimingCase {
   stop_reason?: string;
   /** Time between the first tool item and the stop event: the wait a client pays after the last tool. */
   tool_lead_ms?: number;
+  /** Time between the last text delta and the stop event: the wait a client pays after the last token. */
+  text_tail_ms?: number;
   gateway?: Record<string, number>;
   error_type?: string;
   reason?: string;
+}
+
+function markText(marks: Marks, now: number): void {
+  marks.first_text_ms ??= now;
+  marks.last_text_ms = now;
 }
 
 /** Gateway forwards this env into the child so C7/C9 variants can be A/B measured. */
@@ -86,8 +97,9 @@ function parseChunk(raw: string): { event: string; data: Record<string, unknown>
 const classify: Record<Protocol, (item: ReturnType<typeof parseChunk>, marks: Marks, now: number) => void> = {
   messages(item, marks, now) {
     const block = item.data?.content_block as { type?: string; name?: string } | undefined;
-    const delta = item.data?.delta as { stop_reason?: string } | undefined;
+    const delta = item.data?.delta as { stop_reason?: string; type?: string } | undefined;
     if (item.event === "content_block_start" && block?.type === "tool_use") marks.tool_items.push({ name: block.name ?? "", at_ms: now });
+    if (item.event === "content_block_delta" && delta?.type === "text_delta") markText(marks, now);
     if (item.event === "message_delta" && delta?.stop_reason) {
       marks.stop_ms ??= now;
       marks.stop_reason = delta.stop_reason;
@@ -95,11 +107,12 @@ const classify: Record<Protocol, (item: ReturnType<typeof parseChunk>, marks: Ma
     if (item.event === "error") marks.error_type = String((item.data?.error as { type?: string } | undefined)?.type ?? "error");
   },
   chat(item, marks, now) {
-    const choice = (item.data?.choices as Array<{ delta?: { tool_calls?: Array<{ function?: { name?: string } }> }; finish_reason?: string }> | undefined)?.[0];
+    const choice = (item.data?.choices as Array<{ delta?: { content?: string; tool_calls?: Array<{ function?: { name?: string } }> }; finish_reason?: string }> | undefined)?.[0];
     if (!choice) {
       if (item.data?.error) marks.error_type = String((item.data.error as { type?: string }).type ?? "error");
       return;
     }
+    if (choice.delta?.content) markText(marks, now);
     for (const call of choice.delta?.tool_calls ?? []) {
       if (call.function?.name) marks.tool_items.push({ name: call.function.name, at_ms: now });
     }
@@ -114,6 +127,7 @@ const classify: Record<Protocol, (item: ReturnType<typeof parseChunk>, marks: Ma
     if (type === "response.output_item.added" && (output?.type === "function_call" || output?.type === "custom_tool_call")) {
       marks.tool_items.push({ name: output.name ?? "", at_ms: now });
     }
+    if (type === "response.output_text.delta") markText(marks, now);
     if (type === "response.completed" || type === "response.incomplete" || type === "response.failed") {
       marks.stop_ms ??= now;
       marks.stop_reason = String((item.data?.response as { status?: string } | undefined)?.status ?? type);
@@ -280,7 +294,12 @@ async function main(): Promise<void> {
         http_status: text.status,
         duration_ms: text.duration_ms,
         first_byte_ms: text.marks.first_byte_ms,
+        first_text_ms: text.marks.first_text_ms,
+        last_text_ms: text.marks.last_text_ms,
+        stop_ms: text.marks.stop_ms,
         stop_reason: text.marks.stop_reason,
+        text_tail_ms:
+          text.marks.last_text_ms !== undefined && text.marks.stop_ms !== undefined ? text.marks.stop_ms - text.marks.last_text_ms : undefined,
         gateway: text.gateway,
         error_type: text.marks.error_type,
       });
@@ -339,12 +358,17 @@ async function main(): Promise<void> {
     writeFileSync(output, serialized, { encoding: "utf8", mode: 0o600 });
     for (const item of cases) {
       const wait = item.gateway?.batch_close_wait_ms;
+      const lag = item.gateway?.publish_lag_ms;
       console.log(
         `case ${item.id} ${item.status}${item.duration_ms !== undefined ? ` ${item.duration_ms}ms` : ""}${
+          item.first_text_ms !== undefined ? ` first_text=${item.first_text_ms}ms` : ""
+        }${item.text_tail_ms !== undefined ? ` text_tail=${item.text_tail_ms}ms` : ""}${
           item.first_tool_ms !== undefined ? ` first_tool=${item.first_tool_ms}ms` : ""
         }${item.tool_spread_ms !== undefined ? ` spread=${item.tool_spread_ms}ms` : ""}${
           item.tool_lead_ms !== undefined ? ` tool_lead=${item.tool_lead_ms}ms` : ""
-        }${wait !== undefined ? ` close_wait=${wait}ms` : ""}${item.reason ? ` ${item.reason}` : ""}`,
+        }${wait !== undefined ? ` close_wait=${wait}ms` : ""}${lag !== undefined ? ` publish_lag=${lag}ms` : ""}${
+          item.reason ? ` ${item.reason}` : ""
+        }`,
       );
     }
     console.log(`receipt ${output}`);

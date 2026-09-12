@@ -15,8 +15,11 @@ npm run live:ordinary   # exact-lineage ordinary follow-up only
 npm run live:timing     # where a tool round spends its time
 ```
 
-`live:timing` records first SSE byte, first/last tool item, stop, and gateway
-round timings. It forwards `TOOL_BATCH_SETTLE_MS`, `TOOL_BATCH_IDLE_MS`,
+`live:timing` records first SSE byte, first/last text delta, first/last tool
+item, stop, and gateway round timings (`batch_close_wait_ms`,
+`announce_lead_ms`, `turn_ended_ms`, `run_settled_ms`, `publish_lag_ms`).
+`text_tail_ms` is the client-side wait after the last token and `tool_lead_ms`
+the wait after the first tool item. It forwards `TOOL_BATCH_SETTLE_MS`, `TOOL_BATCH_IDLE_MS`,
 `HOST_SYSTEM_PROMPT_MODE`, and `SSE_HEARTBEAT_MS`. `LIVE_TIMING_PROTOCOL_MODEL`
 picks the Chat/Responses model (default: the first requested model).
 `LIVE_TIMING_REPO_ROOT` / `LIVE_TIMING_ENTRY` point the spawned child at another
