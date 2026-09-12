@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Tool batches close on the SDK's own signals instead of a fixed 1.5 s settle: `partial-tool-call` / `tool-call-started` announce a custom tool call before its execute, `step-completed` ends the model call. A batch is published as soon as no announced call is outstanding and the SDK has been idle for `TOOL_BATCH_IDLE_MS` (default now 200), or immediately on `step-completed`; `TOOL_BATCH_SETTLE_MS` stays the cap and late calls are still carried. `batch_close` adds `step_completed`.
+- The final boundary is published on the SDK `turn-ended` delta with that turn's usage instead of after `run.stream()` EOF and `run.wait()`. Round logs add `turn_ended_ms`, `run_settled_ms`, `publish_lag_ms`, and `announce_lead_ms`; `npm run live:timing` records `text_tail_ms`. Each SSE event is written as one chunk. Live A/B vs `main` (11/11): tool `batch_close_wait_ms` 1500–1502 → 200–234; text `text_tail_ms` 76–122 → 4–21.
 - `/v1/responses` accepts Codex `agent_message` input items as user turns; `encrypted_content` parts degrade to a placeholder instead of returning 400 `unsupported input item type: agent_message`.
 - `HOSTED_SEARCH_MODE=auto` accepts a hosted `web_search` tool that carries Codex filter fields (`user_location`, `search_context_size`, `external_web_access`) and ignores them instead of returning 400 `web_search filters are not supported`. Required/named choice, Chat `web_search_options`, and `x_search` stay 4xx.
 
