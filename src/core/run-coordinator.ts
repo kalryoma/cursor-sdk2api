@@ -12,6 +12,7 @@ import {
   sdkFailure,
   sessionConflict,
   sessionLost,
+  timeoutError,
 } from "../errors.js";
 import type { Logger } from "../log.js";
 import type { ParsedMessages, ParsedToolResult } from "../protocols/anthropic/types.js";
@@ -708,6 +709,7 @@ export class RunCoordinator {
     if (!agentSource) {
       throw sessionLost("Session cannot accept a follow-up send");
     }
+    await this.awaitPreviousRun(session);
     if (session.state !== "completed" && session.state !== "creating") {
       throw sessionLost("Session cannot accept a follow-up send");
     }
@@ -1097,6 +1099,45 @@ export class RunCoordinator {
     }
   }
 
+  /**
+   * The client's final rides `turn-ended`, which the SDK emits before it marks
+   * the run terminal in its store; a send on the same agent in that window is
+   * refused as an active run. Hold the follow-up until the previous run
+   * settled, and give up on one that never does so the session can recover.
+   */
+  private async awaitPreviousRun(session: Session): Promise<void> {
+    const pump = session.pump;
+    if (!pump) return;
+    const cancel = new AbortController();
+    const settled = await Promise.race([
+      pump.runSettled().finally(() => cancel.abort()),
+      this.deps.clock.sleep(this.deps.config.firstEventTimeoutMs, cancel.signal).then(
+        () => "timeout" as const,
+        () => undefined,
+      ),
+    ]);
+    if (settled !== "timeout") return;
+    this.deps.registry.forget(session, "run_settle_timeout");
+    throw timeoutError("Timed out waiting for the previous SDK run to settle");
+  }
+
+  /**
+   * A run that errors after its final was already published must not be
+   * reused for another send. Dropping the live session makes the next
+   * follow-up go through lineage and `Agent.resume` instead.
+   */
+  private forgetOnDirtySettle(session: Session, pump: EventPump | undefined): void {
+    if (!pump) return;
+    void pump.runSettled().then((status) => {
+      if (status === "finished" || session.pump !== pump || session.state !== "completed") return;
+      this.deps.logger.warn(
+        { session_id: session.sessionId, run_status: status, ...pump.timingSummary() },
+        "run settled with an error after the final was published",
+      );
+      this.deps.registry.forget(session, `run_settled_${status}`);
+    });
+  }
+
   private async drive(
     req: IncomingMessage,
     res: ServerResponse,
@@ -1180,6 +1221,7 @@ export class RunCoordinator {
             },
             "turn completed",
           );
+          this.forgetOnDirtySettle(session, session.pump);
         }
       }
       this.persistLineage(session);

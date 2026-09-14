@@ -148,7 +148,8 @@ test("disconnect after partial text detaches the writer but still finalizes a re
   ac.abort();
   await pending.catch(() => undefined);
   expect(fakeRun?.cancelled).toBe(false);
-  expect(fakeRun?.waitCalls).toBeGreaterThanOrEqual(1);
+  // The final rode turn-ended, so the pump reaches wait() a few ticks after the boundary.
+  await waitFor(() => (fakeRun?.waitCalls ?? 0) >= 1);
   release();
   await waitFor(() => {
     const session = [...ctx.app.registry.sessions.values()].find((item) => item.ledgerRunId);

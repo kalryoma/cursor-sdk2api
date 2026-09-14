@@ -487,6 +487,76 @@ test("completed follow-up drops old toolIndex and replay identity", async () => 
   expect(((await stale.json()) as { error: { type: string } }).error.type).toBe("cursor_session_lost");
 });
 
+const textTurn = (content: string, headers: Record<string, string> = {}) =>
+  api(ctx, "/v1/messages", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ model: "composer-2.5", max_tokens: 16, messages: [{ role: "user", content }] }),
+  });
+
+test("a follow-up sent while the previous run is still winding down waits for it to settle", async () => {
+  ctx = await startTestApp({
+    config: { firstEventTimeoutMs: 2_000 },
+    sdk: {
+      finalUsage: { inputTokens: 5, outputTokens: 2 },
+      scripts: [
+        [{ type: "text", chunks: ["pong"] }, { type: "wind-down", ms: 400 }],
+        [{ type: "text", chunks: ["again"] }],
+      ],
+    },
+  });
+  const first = await textTurn("ping");
+  const firstBody = (await first.json()) as { content: Array<{ text?: string }>; cursor_session_id: string };
+  expect(firstBody.content[0]?.text).toBe("pong");
+  const run = ctx.sdk.agents[0]?.runs[0];
+  expect(run?.terminal).toBe(false);
+
+  // The fake refuses a send on a non-terminal run the way the SDK store does.
+  const follow = await textTurn("more", { "x-cursor-session-id": firstBody.cursor_session_id });
+  const followBody = (await follow.json()) as { content: Array<{ text?: string }> };
+  expect(follow.status).toBe(200);
+  expect(followBody.content[0]?.text).toBe("again");
+  expect(ctx.sdk.agents[0]?.sendCount).toBe(2);
+  expect(run?.waitCalls).toBe(1);
+  expect(ctx.sdk.resumeCalls).toHaveLength(0);
+});
+
+test("a run that errors after its final was published is dropped instead of reused", async () => {
+  ctx = await startTestApp({
+    captureLogs: true,
+    config: { firstEventTimeoutMs: 2_000 },
+    sdk: {
+      finalUsage: { inputTokens: 5, outputTokens: 2 },
+      agentScripts: [
+        [[{ type: "text", chunks: ["pong"] }, { type: "wind-down", ms: 300 }, { type: "error", message: "persist failed" }]],
+        [[{ type: "text", chunks: ["resumed"] }]],
+      ],
+    },
+  });
+  const first = await textTurn("ping");
+  const firstBody = (await first.json()) as { content: Array<{ text?: string }>; cursor_session_id: string };
+  expect(first.status).toBe(200);
+  expect(firstBody.content[0]?.text).toBe("pong");
+
+  // In the window: the follow-up waits, the run settles as an error, the live session is gone.
+  const inWindow = await textTurn("more", { "x-cursor-session-id": firstBody.cursor_session_id });
+  expect(inWindow.status).toBe(409);
+  expect(((await inWindow.json()) as { error: { type: string } }).error.type).toBe("cursor_session_lost");
+  expect(ctx.app.registry.get(firstBody.cursor_session_id)).toBeUndefined();
+  expect(ctx.sdk.agents[0]?.sendCount).toBe(1);
+  const warned = ctx.logs
+    .map((line) => JSON.parse(line) as { fields: Record<string, unknown>; message: string })
+    .find((entry) => entry.message === "run settled with an error after the final was published");
+  expect(warned?.fields.run_status).toBe("error");
+
+  // After the window: the same id resumes the Agent from lineage on a fresh handle.
+  const retry = await textTurn("more", { "x-cursor-session-id": firstBody.cursor_session_id });
+  const retryBody = (await retry.json()) as { content: Array<{ text?: string }> };
+  expect(retry.status).toBe(200);
+  expect(retryBody.content[0]?.text).toBe("resumed");
+  expect(ctx.sdk.resumeCalls).toHaveLength(1);
+});
+
 test("event pump refuses a second stream consumer", async () => {
   ctx = await startTestApp({
     sdk: { scripts: [[{ type: "text", chunks: ["one"] }]] },

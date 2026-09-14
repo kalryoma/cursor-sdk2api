@@ -2,7 +2,7 @@ import type { Clock } from "../clock.js";
 import { emptyTurn, sdkFailure, timeoutError, upstreamError } from "../errors.js";
 import { messageId } from "../ids.js";
 import type { AnthropicContentBlock, AssistantTurn, ToolUseBlock } from "../protocols/anthropic/types.js";
-import type { SdkDeltaUpdate, SdkRun, SdkStreamEvent, SdkUsage } from "../sdk/port.js";
+import type { SdkDeltaUpdate, SdkRun, SdkRunResult, SdkStreamEvent, SdkUsage } from "../sdk/port.js";
 import { deferredUsage, fromSdkUsage } from "./usage.js";
 import type { EarlyEvent, PendingCall, Session } from "./session.js";
 
@@ -20,6 +20,9 @@ export interface BatchClose {
   reason: "settle_timer" | "idle" | "step_completed" | "carried";
   waitedMs: number;
 }
+
+/** Terminal status of the SDK run once `run.stream()` drained and `run.wait()` settled. */
+export type RunSettleStatus = SdkRunResult["status"] | "threw";
 
 /** Clock stamps for one HTTP response segment; numbers only, never payloads. */
 export interface SegmentTiming {
@@ -120,6 +123,7 @@ export class EventPump {
   private readonly announced = new Set<string>();
   /** The model call that produced the open batch has finished generating. */
   private stepCompleted = false;
+  private settledStatus?: RunSettleStatus;
   lastBatchClose?: BatchClose;
   timing: SegmentTiming;
 
@@ -290,6 +294,16 @@ export class EventPump {
     });
   }
 
+  /**
+   * Resolves once `run.stream()` drained and `run.wait()` settled, with the
+   * run's terminal status. A final that rode `turn-ended` is published before
+   * this point, and the SDK refuses a new send on the agent until its store
+   * holds the run as terminal, so a follow-up must wait here first.
+   */
+  runSettled(): Promise<RunSettleStatus> {
+    return (this.consumer ?? Promise.resolve()).then(() => this.settledStatus ?? "finished");
+  }
+
   /** Replay events that arrived before this pump existed, in arrival order. */
   ingestEarly(events: EarlyEvent[]): void {
     for (const event of events) {
@@ -427,6 +441,7 @@ export class EventPump {
       // Stream EOF is progress; do not empty-fail before wait().
       this.markFirstEvent();
       const result = await this.run.wait();
+      this.settledStatus = result.status;
       if (this.finished) return;
       if (result.status === "error") {
         this.fail(sdkFailure(result.error?.message ?? "SDK run error"));
@@ -460,6 +475,7 @@ export class EventPump {
         },
       });
     } catch (error) {
+      this.settledStatus ??= "threw";
       this.fail(sdkFailure(error));
     } finally {
       this.finished = true;

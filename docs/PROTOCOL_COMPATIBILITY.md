@@ -26,7 +26,7 @@ Outer agents (Claude Code, Grok Build) execute their own local file tools in the
 | mixed text + tool_result | no | `422 invalid_request` |
 | usage / cache | pass-through | Final-only cumulative; omit missing fields |
 | ordinary next turn without session header | yes | Exact transcript lineage reuses the Agent and sends only the current user turn. Unknown, forked, compacted, or mismatched requests cold-rebuild. `ORDINARY_TURN_COORDINATOR=0` disables this. |
-| completed `x-cursor-session-id` follow-up | yes | Store + `Agent.resume` within TTL |
+| completed `x-cursor-session-id` follow-up | yes | Store + `Agent.resume` within TTL. A follow-up that lands before the previous SDK run is terminal waits for it; if that run then ends in error the live session is dropped and the request is `409 cursor_session_lost` (retry resumes from lineage). |
 | pending tool restart | yes | Exact credential/model/tool batch resumes with persisted SDK Agent lineage and `local.force=true` |
 | expired/moved tool continuation | yes | A complete transcript whose latest assistant tool batch exactly matches the submitted results can cold-branch to a new SDK Agent; recorded identical tools replay internally |
 | duplicate-same after restart | no | Digest only; no persisted assistant replay |
