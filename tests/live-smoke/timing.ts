@@ -359,6 +359,7 @@ async function main(): Promise<void> {
     for (const item of cases) {
       const wait = item.gateway?.batch_close_wait_ms;
       const lag = item.gateway?.publish_lag_ms;
+      const silence = item.gateway?.batch_silence_ms;
       console.log(
         `case ${item.id} ${item.status}${item.duration_ms !== undefined ? ` ${item.duration_ms}ms` : ""}${
           item.first_text_ms !== undefined ? ` first_text=${item.first_text_ms}ms` : ""
@@ -366,9 +367,9 @@ async function main(): Promise<void> {
           item.first_tool_ms !== undefined ? ` first_tool=${item.first_tool_ms}ms` : ""
         }${item.tool_spread_ms !== undefined ? ` spread=${item.tool_spread_ms}ms` : ""}${
           item.tool_lead_ms !== undefined ? ` tool_lead=${item.tool_lead_ms}ms` : ""
-        }${wait !== undefined ? ` close_wait=${wait}ms` : ""}${lag !== undefined ? ` publish_lag=${lag}ms` : ""}${
-          item.reason ? ` ${item.reason}` : ""
-        }`,
+        }${wait !== undefined ? ` close_wait=${wait}ms` : ""}${silence !== undefined ? ` silence=${silence}ms` : ""}${
+          lag !== undefined ? ` publish_lag=${lag}ms` : ""
+        }${item.reason ? ` ${item.reason}` : ""}`,
       );
     }
     console.log(`receipt ${output}`);

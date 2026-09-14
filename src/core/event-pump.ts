@@ -32,8 +32,12 @@ export interface SegmentTiming {
   firstDeliveryAt?: number;
   /** Latest content or token delta, or tool callback: the last thing the model produced. */
   lastDeltaAt?: number;
-  /** First custom tool call the model started emitting, before its execute fired. */
-  firstAnnounceAt?: number;
+  /** Smallest announce → execute gap across the batch; absent when no call was announced first. */
+  announceLeadMs?: number;
+  /** Executes the SDK never announced first: the idle close cannot see these coming. */
+  unannouncedCalls?: number;
+  /** Longest quiet gap between SDK signals while the batch was open; the idle window must exceed it. */
+  batchSilenceMs?: number;
   firstToolAt?: number;
   lastToolAt?: number;
   turnEndedAt?: number;
@@ -117,12 +121,15 @@ export class EventPump {
   private carried: Array<{ kind: "text" | "thinking"; text: string } | { kind: "tool"; call: PendingCall }> = [];
   /**
    * Custom tool calls the model has started emitting whose execute has not
-   * fired yet. While any is outstanding the batch is still being generated,
-   * so the idle close stays disarmed; the settle cap still applies.
+   * fired yet, by the clock time of the announce. While any is outstanding the
+   * batch is still being generated, so the idle close stays disarmed; the
+   * settle cap still applies.
    */
-  private readonly announced = new Set<string>();
+  private readonly announced = new Map<string, number>();
   /** The model call that produced the open batch has finished generating. */
   private stepCompleted = false;
+  /** Clock time of the latest SDK signal of any kind, for the batch silence metric. */
+  private lastSignalAt?: number;
   private settledStatus?: RunSettleStatus;
   lastBatchClose?: BatchClose;
   timing: SegmentTiming;
@@ -174,8 +181,9 @@ export class EventPump {
         ? {
             tool_count: t.toolCount,
             tool_spread_ms: between(t.firstToolAt, t.lastToolAt),
-            // How far ahead of its execute the SDK announced the first call; absent when it never did.
-            announce_lead_ms: between(t.firstAnnounceAt, t.firstToolAt),
+            announce_lead_ms: t.announceLeadMs,
+            unannounced_calls: t.unannouncedCalls,
+            batch_silence_ms: t.batchSilenceMs,
             batch_close_wait_ms: this.lastBatchClose?.waitedMs,
             carried_count: t.carriedCount,
           }
@@ -201,6 +209,7 @@ export class EventPump {
     this.lastCallAt = undefined;
     this.lastBatchClose = undefined;
     this.stepCompleted = false;
+    this.lastSignalAt = undefined;
     const now = this.clock.now();
     this.timing = { startedAt: now, agentReadyAt: now, toolCount: 0 };
     if (this.carried.length === 0) return;
@@ -233,13 +242,17 @@ export class EventPump {
   }
 
   notifyTool(call: PendingCall): void {
+    const now = this.clock.now();
+    const announcedAt = this.announced.get(call.toolUseId);
     this.announced.delete(call.toolUseId);
     if (this.publishedBoundary?.type === "tools") {
       this.carried.push({ kind: "tool", call });
       return;
     }
+    if (announcedAt === undefined) this.timing.unannouncedCalls = (this.timing.unannouncedCalls ?? 0) + 1;
+    else this.timing.announceLeadMs = Math.min(this.timing.announceLeadMs ?? Infinity, now - announcedAt);
     this.markFirstEvent();
-    this.openCall(call);
+    this.openCall(call, now);
     this.evaluateClose();
     // Settle is the cap: it fires whatever the announce or step signals said.
     const generation = ++this.settleGeneration;
@@ -314,11 +327,12 @@ export class EventPump {
 
   ingestDelta(update: SdkDeltaUpdate): void {
     this.markFirstEvent();
+    const now = this.clock.now();
+    this.noteSignal(now);
     if (update.type === "tool-call-announced") {
       // Already executed (or replayed): nothing is outstanding for this id.
       if (this.session.pending.has(update.callId)) return;
-      this.announced.add(update.callId);
-      this.timing.firstAnnounceAt ??= this.clock.now();
+      this.announced.set(update.callId, now);
       // The batch is about to grow; a pending idle close is no longer authoritative.
       this.idleGeneration += 1;
       return;
@@ -333,13 +347,13 @@ export class EventPump {
       return;
     }
     if (update.type === "turn-ended") {
-      this.timing.turnEndedAt = this.clock.now();
+      this.timing.turnEndedAt = now;
       this.stepCompleted = false;
       this.publishFinalFromTurnEnded(update.usage);
       return;
     }
     // Any delta while a batch is open means the model is still generating it.
-    this.timing.lastDeltaAt = this.clock.now();
+    this.timing.lastDeltaAt = now;
     this.stepCompleted = false;
     this.evaluateClose();
     if (update.type === "token-delta") return;
@@ -381,12 +395,26 @@ export class EventPump {
     this.timing.firstEventAt ??= this.clock.now();
   }
 
+  /**
+   * Record the longest quiet gap the idle window had to outlast while the
+   * batch was open. Announces count as signals: they are what keeps a slow
+   * sibling's batch whole. The gap that finally closed the batch is not
+   * included, since it is the idle window itself.
+   */
+  private noteSignal(now: number): void {
+    if (this.openBatch.length > 0 && this.lastSignalAt !== undefined) {
+      this.timing.batchSilenceMs = Math.max(this.timing.batchSilenceMs ?? 0, now - this.lastSignalAt);
+    }
+    this.lastSignalAt = now;
+  }
+
   /** Add a call to the open batch, the journal, and attached sinks. */
-  private openCall(call: PendingCall): void {
+  private openCall(call: PendingCall, now = this.clock.now()): void {
+    this.noteSignal(now);
     this.session.hasSemanticOutput = true;
     this.session.sawToolBatch = true;
     this.openBatch.push(call);
-    this.lastCallAt = this.clock.now();
+    this.lastCallAt = now;
     this.timing.firstToolAt ??= this.lastCallAt;
     this.timing.lastToolAt = this.lastCallAt;
     this.timing.lastDeltaAt = this.lastCallAt;
@@ -502,6 +530,7 @@ export class EventPump {
     this.idleGeneration += 1;
     this.announced.clear();
     this.stepCompleted = false;
+    this.lastSignalAt = undefined;
     this.lastBatchClose = { reason, waitedMs: this.clock.now() - (this.lastCallAt ?? this.clock.now()) };
     this.lastCallAt = undefined;
     const blocks = blocksFromJournal(this.deltaHistory);

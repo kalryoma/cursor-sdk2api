@@ -285,6 +285,11 @@ test("TOOL_BATCH_IDLE_MS closes a batch after SDK silence and is postponed by on
   expect(awaiting?.batch_close).toBe("idle");
   expect(awaiting?.batch_close_wait_ms).toBeGreaterThanOrEqual(140);
   expect(awaiting?.tool_count).toBe(2);
+  // Neither call was announced; the longest quiet gap (~60 ms) stayed under the window.
+  expect(awaiting?.unannounced_calls).toBe(2);
+  expect(awaiting?.announce_lead_ms).toBeUndefined();
+  expect(awaiting?.batch_silence_ms).toBeGreaterThanOrEqual(40);
+  expect(awaiting?.batch_silence_ms).toBeLessThan(150);
 });
 
 test("with TOOL_BATCH_IDLE_MS a silent gap splits the batch and the late call is carried", async () => {
@@ -352,7 +357,12 @@ test("an announced sibling holds the idle close open so a slow parallel batch st
   const awaiting = logFields(ctx, "awaiting tool results");
   expect(awaiting?.batch_close).toBe("idle");
   expect(awaiting?.tool_count).toBe(2);
+  // Both calls were announced first; the smallest lead is lookup's (announced on dispatch).
   expect(awaiting?.announce_lead_ms).toBeGreaterThanOrEqual(0);
+  expect(awaiting?.announce_lead_ms).toBeLessThan(100);
+  expect(awaiting?.unannounced_calls).toBeUndefined();
+  // The 250 ms quiet stretch between announce and execute is what the announce set bridged.
+  expect(awaiting?.batch_silence_ms).toBeGreaterThanOrEqual(200);
   // The close waited for beta's execute plus one idle window, not the 3 s settle cap.
   expect(awaiting?.batch_close_wait_ms).toBeLessThan(500);
 });
