@@ -210,6 +210,9 @@ export class EventPump {
     this.lastBatchClose = undefined;
     this.stepCompleted = false;
     this.lastSignalAt = undefined;
+    // The SDK only generates again after every execute resolved, so nothing
+    // announced before this point can still belong to the next batch.
+    this.announced.clear();
     const now = this.clock.now();
     this.timing = { startedAt: now, agentReadyAt: now, toolCount: 0 };
     if (this.carried.length === 0) return;
