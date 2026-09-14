@@ -131,6 +131,8 @@ export class EventPump {
   /** Clock time of the latest SDK signal of any kind, for the batch silence metric. */
   private lastSignalAt?: number;
   private settledStatus?: RunSettleStatus;
+  /** The segment's final was published on `turn-ended`, ahead of the run settling. */
+  private finalFromTurnEnded = false;
   lastBatchClose?: BatchClose;
   timing: SegmentTiming;
 
@@ -177,6 +179,9 @@ export class EventPump {
       duration_ms: since(t.publishedAt),
       // Gateway-visible wait between the model's last output and the published stop.
       publish_lag_ms: between(t.lastDeltaAt, t.publishedAt),
+      // How long the SDK took to make the run terminal after the client had its final:
+      // the most a follow-up send that lands in that window waits.
+      settle_lag_ms: this.finalFromTurnEnded ? between(t.publishedAt, t.runSettledAt) : undefined,
       ...(t.toolCount > 0
         ? {
             tool_count: t.toolCount,
@@ -379,6 +384,7 @@ export class EventPump {
     if (!usage) return;
     this.session.usageConfirmed = true;
     this.session.hasSemanticOutput = true;
+    this.finalFromTurnEnded = true;
     this.publish({
       type: "final",
       turn: {

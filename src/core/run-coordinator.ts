@@ -1122,18 +1122,22 @@ export class RunCoordinator {
   }
 
   /**
-   * A run that errors after its final was already published must not be
-   * reused for another send. Dropping the live session makes the next
-   * follow-up go through lineage and `Agent.resume` instead.
+   * The final was published before the run settled, so its log line could not
+   * carry `run_settled_ms`. Log the settlement when it lands, and drop a live
+   * session whose run ended in error: reusing it for another send is unsafe,
+   * and without it the next follow-up goes through lineage and `Agent.resume`.
    */
-  private forgetOnDirtySettle(session: Session, pump: EventPump | undefined): void {
+  private observeRunSettle(session: Session, pump: EventPump | undefined): void {
     if (!pump) return;
     void pump.runSettled().then((status) => {
-      if (status === "finished" || session.pump !== pump || session.state !== "completed") return;
-      this.deps.logger.warn(
-        { session_id: session.sessionId, run_status: status, ...pump.timingSummary() },
-        "run settled with an error after the final was published",
-      );
+      if (session.pump !== pump || session.state !== "completed") return;
+      const timing = pump.timingSummary();
+      const fields = { session_id: session.sessionId, run_status: status, ...timing };
+      if (status === "finished") {
+        if (timing.settle_lag_ms !== undefined) this.deps.logger.info(fields, "run settled");
+        return;
+      }
+      this.deps.logger.warn(fields, "run settled with an error after the final was published");
       this.deps.registry.forget(session, `run_settled_${status}`);
     });
   }
@@ -1221,7 +1225,7 @@ export class RunCoordinator {
             },
             "turn completed",
           );
-          this.forgetOnDirtySettle(session, session.pump);
+          this.observeRunSettle(session, session.pump);
         }
       }
       this.persistLineage(session);

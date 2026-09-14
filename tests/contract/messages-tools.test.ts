@@ -482,13 +482,20 @@ test("the final boundary rides turn-ended instead of waiting for the run to wind
   expect(completed?.usage_status).toBe("sdk");
   expect(typeof completed?.turn_ended_ms).toBe("number");
   expect(typeof completed?.publish_lag_ms).toBe("number");
-  // The run settles after the client already has its answer.
+  // The boundary line cannot know when the run settles; that lands on its own line.
+  expect(completed?.run_settled_ms).toBeUndefined();
+  expect(logFields(ctx, "run settled")).toBeUndefined();
   await new Promise((resolve) => setTimeout(resolve, 700));
   expect(ctx.sdk.agents[0]?.runs[0]?.waitCalls).toBe(1);
+  const settled = logFields(ctx, "run settled");
+  expect(settled?.run_status).toBe("finished");
+  expect(settled?.settle_lag_ms).toBeGreaterThanOrEqual(500);
+  expect(settled?.run_settled_ms).toBeGreaterThanOrEqual(settled?.settle_lag_ms as number);
 });
 
 test("a turn whose text arrives only in the run result still completes through the EOF path", async () => {
   ctx = await startTestApp({
+    captureLogs: true,
     sdk: {
       finalUsage: { inputTokens: 3, outputTokens: 2 },
       scripts: [[{ type: "silent-final", text: "quiet" }, { type: "wind-down", ms: 50 }]],
@@ -502,6 +509,9 @@ test("a turn whose text arrives only in the run result still completes through t
   expect(res.status).toBe(200);
   expect(body.content[0]?.text).toBe("quiet");
   expect(body.usage).toMatchObject({ input_tokens: 3, output_tokens: 2 });
+  // The EOF path published after the run settled, so there is no separate settle line.
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(logFields(ctx, "run settled")).toBeUndefined();
 });
 
 test("the settle timer restarts on each callback so a staggered batch stays whole", async () => {
