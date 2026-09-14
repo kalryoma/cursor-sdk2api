@@ -163,13 +163,34 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 }
 
-function mapDeltaUpdate(raw: unknown): SdkDeltaUpdate | undefined {
+/** Official `SendOptions.onDelta` `InteractionUpdate` -> the port's delta vocabulary. */
+export function mapDeltaUpdate(raw: unknown): SdkDeltaUpdate | undefined {
   const update = asRecord(raw);
   if (update.type === "text-delta" || update.type === "thinking-delta") {
     return { type: update.type, text: String(update.text ?? "") };
   }
   if (update.type === "token-delta") {
     return { type: "token-delta", tokens: typeof update.tokens === "number" ? update.tokens : 0 };
+  }
+  if (update.type === "tool-call-started" || update.type === "partial-tool-call") {
+    // Only custom tools reach the client; ambient tool calls are disallowed and stay internal.
+    const toolCall = asRecord(update.toolCall);
+    if (toolCall.type !== "mcp" || typeof update.callId !== "string" || !update.callId) return undefined;
+    const args = asRecord(toolCall.args);
+    return {
+      type: "tool-call-announced",
+      callId: update.callId,
+      ...(typeof args.toolName === "string" ? { toolName: args.toolName } : {}),
+    };
+  }
+  if (update.type === "step-started" || update.type === "step-completed") {
+    const stepId = typeof update.stepId === "number" ? update.stepId : 0;
+    if (update.type === "step-started") return { type: "step-started", stepId };
+    return {
+      type: "step-completed",
+      stepId,
+      durationMs: typeof update.stepDurationMs === "number" ? update.stepDurationMs : 0,
+    };
   }
   if (update.type !== "turn-ended") return undefined;
   const usage = mapUsage(update.usage);

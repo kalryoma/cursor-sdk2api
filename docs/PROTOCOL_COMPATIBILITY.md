@@ -18,7 +18,7 @@ Outer agents (Claude Code, Grok Build) execute their own local file tools in the
 |---|---|---|
 | `GET /console/` | optional | Static BF Labs Operator Console served by the gateway. It manages the persistent Cursor account pool but does not add billing, users, or a second production process. |
 | `POST /v1/messages` non-stream text | yes | Native Anthropic `user`/`assistant` plus sub2api compatibility roles. `system`/`developer` preserve transcript order. Historical `tool`/`function` output is retained; a trailing compatibility tool result needs `tool_call_id`, `call_id`, or `id`. |
-| SSE text / thinking | yes | Incremental `onDelta` (`text-delta` / `thinking-delta`). `run.stream()` is tool/status/terminal. Tool items are written when the SDK requests the tool; stream, non-stream body, replay, and `response.completed.output` share one journal. `SSE_HEARTBEAT_MS` keeps a started stream alive. |
+| SSE text / thinking | yes | Incremental `onDelta` (`text-delta` / `thinking-delta`). `run.stream()` is tool/status/terminal. Tool items are written when the SDK requests the tool; the tool stop follows the SDK's announce / `step-completed` signals with `TOOL_BATCH_IDLE_MS` silence, and the final stop rides `turn-ended`. Stream, non-stream body, replay, and `response.completed.output` share one journal. `SSE_HEARTBEAT_MS` keeps a started stream alive. |
 | images (base64) | yes | Mapped to SDK `images` |
 | client tools | yes | `local.customTools` |
 | parallel tools | yes | One assistant batch |
@@ -26,7 +26,7 @@ Outer agents (Claude Code, Grok Build) execute their own local file tools in the
 | mixed text + tool_result | no | `422 invalid_request` |
 | usage / cache | pass-through | Final-only cumulative; omit missing fields |
 | ordinary next turn without session header | yes | Exact transcript lineage reuses the Agent and sends only the current user turn. Unknown, forked, compacted, or mismatched requests cold-rebuild. `ORDINARY_TURN_COORDINATOR=0` disables this. |
-| completed `x-cursor-session-id` follow-up | yes | Store + `Agent.resume` within TTL |
+| completed `x-cursor-session-id` follow-up | yes | Store + `Agent.resume` within TTL. A follow-up that lands before the previous SDK run is terminal waits for it; if that run then ends in error the live session is dropped and the request is `409 cursor_session_lost` (retry resumes from lineage). |
 | pending tool restart | yes | Exact credential/model/tool batch resumes with persisted SDK Agent lineage and `local.force=true` |
 | expired/moved tool continuation | yes | A complete transcript whose latest assistant tool batch exactly matches the submitted results can cold-branch to a new SDK Agent; recorded identical tools replay internally |
 | duplicate-same after restart | no | Digest only; no persisted assistant replay |

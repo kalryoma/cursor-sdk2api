@@ -285,6 +285,11 @@ test("TOOL_BATCH_IDLE_MS closes a batch after SDK silence and is postponed by on
   expect(awaiting?.batch_close).toBe("idle");
   expect(awaiting?.batch_close_wait_ms).toBeGreaterThanOrEqual(140);
   expect(awaiting?.tool_count).toBe(2);
+  // Neither call was announced; the longest quiet gap (~60 ms) stayed under the window.
+  expect(awaiting?.unannounced_calls).toBe(2);
+  expect(awaiting?.announce_lead_ms).toBeUndefined();
+  expect(awaiting?.batch_silence_ms).toBeGreaterThanOrEqual(40);
+  expect(awaiting?.batch_silence_ms).toBeLessThan(150);
 });
 
 test("with TOOL_BATCH_IDLE_MS a silent gap splits the batch and the late call is carried", async () => {
@@ -322,6 +327,191 @@ test("with TOOL_BATCH_IDLE_MS a silent gap splits the batch and the late call is
     .filter((entry) => entry.message === "awaiting tool results")
     .map((entry) => entry.fields.batch_close);
   expect(closes).toEqual(["idle", "carried"]);
+});
+
+test("an announced sibling holds the idle close open so a slow parallel batch stays whole", async () => {
+  ctx = await startTestApp({
+    captureLogs: true,
+    config: { toolBatchSettleMs: 3_000, toolBatchIdleMs: 40 },
+    sdk: {
+      scripts: [
+        [
+          {
+            type: "tools",
+            // beta executes 250 ms after lookup, far past the 40 ms window, but its
+            // announce lands right after lookup's execute and keeps the batch open.
+            calls: [
+              { name: "lookup", input: { q: "a" } },
+              { name: "beta", input: { n: 2 }, delayMs: 250 },
+            ],
+            announceLeadMs: 240,
+          },
+          { type: "text", chunks: ["both"] },
+        ],
+      ],
+    },
+  });
+  const turn = await firstToolTurn(ctx);
+  expect(turn.names).toEqual(["beta", "lookup"]);
+  expect(turn.elapsedMs).toBeLessThan(1_000);
+  const awaiting = logFields(ctx, "awaiting tool results");
+  expect(awaiting?.batch_close).toBe("idle");
+  expect(awaiting?.tool_count).toBe(2);
+  // Both calls were announced first; the smallest lead is lookup's (announced on dispatch).
+  expect(awaiting?.announce_lead_ms).toBeGreaterThanOrEqual(0);
+  expect(awaiting?.announce_lead_ms).toBeLessThan(100);
+  expect(awaiting?.unannounced_calls).toBeUndefined();
+  // The 250 ms quiet stretch between announce and execute is what the announce set bridged.
+  expect(awaiting?.batch_silence_ms).toBeGreaterThanOrEqual(200);
+  // The close waited for beta's execute plus one idle window, not the 3 s settle cap.
+  expect(awaiting?.batch_close_wait_ms).toBeLessThan(500);
+});
+
+test("step-completed closes an open batch at once without waiting for idle or settle", async () => {
+  ctx = await startTestApp({
+    captureLogs: true,
+    config: { toolBatchSettleMs: 3_000, toolBatchIdleMs: 1_000 },
+    sdk: {
+      scripts: [
+        [
+          {
+            type: "tools",
+            calls: [
+              { name: "lookup", input: { q: "a" } },
+              { name: "beta", input: { n: 2 }, delayMs: 30 },
+            ],
+            stepCompletedAfterMs: 60,
+          },
+          { type: "text", chunks: ["both"] },
+        ],
+      ],
+    },
+  });
+  const turn = await firstToolTurn(ctx);
+  expect(turn.names).toEqual(["beta", "lookup"]);
+  expect(turn.elapsedMs).toBeLessThan(600);
+  const awaiting = logFields(ctx, "awaiting tool results");
+  expect(awaiting?.batch_close).toBe("step_completed");
+  expect(awaiting?.batch_close_wait_ms).toBeLessThan(200);
+});
+
+test("a step-completed that lands while an announced call is outstanding waits for that execute", async () => {
+  ctx = await startTestApp({
+    captureLogs: true,
+    config: { toolBatchSettleMs: 3_000, toolBatchIdleMs: 1_000 },
+    sdk: {
+      scripts: [
+        [
+          {
+            type: "tools",
+            calls: [
+              { name: "lookup", input: { q: "a" } },
+              { name: "beta", input: { n: 2 }, delayMs: 150 },
+            ],
+            announceLeadMs: 150,
+            stepCompletedAfterMs: 40,
+          },
+          { type: "text", chunks: ["both"] },
+        ],
+      ],
+    },
+  });
+  const turn = await firstToolTurn(ctx);
+  expect(turn.names).toEqual(["beta", "lookup"]);
+  const awaiting = logFields(ctx, "awaiting tool results");
+  expect(awaiting?.batch_close).toBe("step_completed");
+  expect(awaiting?.tool_count).toBe(2);
+});
+
+test("the settle cap still publishes when an announced call never executes, and the late call is carried", async () => {
+  ctx = await startTestApp({
+    captureLogs: true,
+    config: { toolBatchSettleMs: 120, toolBatchIdleMs: 20 },
+    sdk: {
+      scripts: [
+        [
+          {
+            type: "tools",
+            // beta is announced right away but does not execute until after the cap.
+            calls: [
+              { name: "lookup", input: { q: "a" } },
+              { name: "beta", input: { n: 2 }, delayMs: 400 },
+            ],
+            announceLeadMs: 400,
+          },
+          { type: "text", chunks: ["both"] },
+        ],
+      ],
+    },
+  });
+  const first = await api(ctx, "/v1/messages", {
+    method: "POST",
+    body: JSON.stringify({ model: "composer-2.5", max_tokens: 32, messages: [{ role: "user", content: "do both" }], tools }),
+  });
+  const turn = (await first.json()) as { content: Array<{ type: string; id?: string; name?: string }> };
+  expect(turn.content.filter((block) => block.type === "tool_use").map((block) => block.name)).toEqual(["lookup"]);
+  expect(logFields(ctx, "awaiting tool results")?.batch_close).toBe("settle_timer");
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  const carried = await toolResultTurn(ctx, turn.content.find((block) => block.type === "tool_use")?.id ?? "", "ok");
+  const next = (await carried.json()) as { content: Array<{ type: string; name?: string }>; stop_reason: string };
+  expect(next.stop_reason).toBe("tool_use");
+  expect(next.content.map((block) => block.name)).toEqual(["beta"]);
+});
+
+test("the final boundary rides turn-ended instead of waiting for the run to wind down", async () => {
+  ctx = await startTestApp({
+    captureLogs: true,
+    sdk: {
+      finalUsage: { inputTokens: 11, outputTokens: 7 },
+      scripts: [[{ type: "text", chunks: ["pong"] }, { type: "wind-down", ms: 600 }]],
+    },
+  });
+  const started = Date.now();
+  const res = await api(ctx, "/v1/messages", {
+    method: "POST",
+    body: JSON.stringify({ model: "composer-2.5", max_tokens: 32, messages: [{ role: "user", content: "ping" }] }),
+  });
+  const elapsedMs = Date.now() - started;
+  const body = (await res.json()) as { stop_reason: string; content: Array<{ text?: string }>; usage: Record<string, unknown> };
+  expect(res.status).toBe(200);
+  expect(elapsedMs).toBeLessThan(450);
+  expect(body.stop_reason).toBe("end_turn");
+  expect(body.content[0]?.text).toBe("pong");
+  expect(body.usage).toMatchObject({ input_tokens: 11, output_tokens: 7 });
+  const completed = logFields(ctx, "turn completed");
+  expect(completed?.usage_status).toBe("sdk");
+  expect(typeof completed?.turn_ended_ms).toBe("number");
+  expect(typeof completed?.publish_lag_ms).toBe("number");
+  // The boundary line cannot know when the run settles; that lands on its own line.
+  expect(completed?.run_settled_ms).toBeUndefined();
+  expect(logFields(ctx, "run settled")).toBeUndefined();
+  await new Promise((resolve) => setTimeout(resolve, 700));
+  expect(ctx.sdk.agents[0]?.runs[0]?.waitCalls).toBe(1);
+  const settled = logFields(ctx, "run settled");
+  expect(settled?.run_status).toBe("finished");
+  expect(settled?.settle_lag_ms).toBeGreaterThanOrEqual(500);
+  expect(settled?.run_settled_ms).toBeGreaterThanOrEqual(settled?.settle_lag_ms as number);
+});
+
+test("a turn whose text arrives only in the run result still completes through the EOF path", async () => {
+  ctx = await startTestApp({
+    captureLogs: true,
+    sdk: {
+      finalUsage: { inputTokens: 3, outputTokens: 2 },
+      scripts: [[{ type: "silent-final", text: "quiet" }, { type: "wind-down", ms: 50 }]],
+    },
+  });
+  const res = await api(ctx, "/v1/messages", {
+    method: "POST",
+    body: JSON.stringify({ model: "composer-2.5", max_tokens: 32, messages: [{ role: "user", content: "ping" }] }),
+  });
+  const body = (await res.json()) as { content: Array<{ text?: string }>; usage: Record<string, unknown> };
+  expect(res.status).toBe(200);
+  expect(body.content[0]?.text).toBe("quiet");
+  expect(body.usage).toMatchObject({ input_tokens: 3, output_tokens: 2 });
+  // The EOF path published after the run settled, so there is no separate settle line.
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(logFields(ctx, "run settled")).toBeUndefined();
 });
 
 test("the settle timer restarts on each callback so a staggered batch stays whole", async () => {
@@ -371,7 +561,7 @@ async function readTimedSse(res: Response): Promise<Array<{ event: string; data:
 
 test("SSE writes the tool_use block when the SDK requests the tool, before the batch closes", async () => {
   ctx = await startTestApp({
-    config: { toolBatchSettleMs: 400 },
+    config: { toolBatchSettleMs: 400, toolBatchIdleMs: 0 },
     sdk: {
       scripts: [
         [

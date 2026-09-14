@@ -91,6 +91,15 @@ export type SdkDeltaUpdate =
   | { type: "thinking-delta"; text: string }
   /** Running token count while the model generates; a liveness signal, no content. */
   | { type: "token-delta"; tokens: number }
+  /**
+   * The model has started emitting a custom (MCP) tool call whose execute has
+   * not fired yet. `callId` is the id later seen as `SdkCustomToolContext.toolCallId`.
+   */
+  | { type: "tool-call-announced"; callId: string; toolName?: string }
+  /** One model call of the agent loop began. */
+  | { type: "step-started"; stepId: number }
+  /** One model call of the agent loop finished generating. */
+  | { type: "step-completed"; stepId: number; durationMs: number }
   /** End of the agent turn; arrives after custom-tool results, carries that turn's usage. */
   | { type: "turn-ended"; usage?: SdkUsage };
 

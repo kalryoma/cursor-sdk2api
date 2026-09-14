@@ -2,7 +2,7 @@ import type { Clock } from "../clock.js";
 import { emptyTurn, sdkFailure, timeoutError, upstreamError } from "../errors.js";
 import { messageId } from "../ids.js";
 import type { AnthropicContentBlock, AssistantTurn, ToolUseBlock } from "../protocols/anthropic/types.js";
-import type { SdkDeltaUpdate, SdkRun, SdkStreamEvent } from "../sdk/port.js";
+import type { SdkDeltaUpdate, SdkRun, SdkRunResult, SdkStreamEvent, SdkUsage } from "../sdk/port.js";
 import { deferredUsage, fromSdkUsage } from "./usage.js";
 import type { EarlyEvent, PendingCall, Session } from "./session.js";
 
@@ -17,9 +17,12 @@ export type DeltaRecord =
 
 /** How the batch closed and how long after its last tool callback. */
 export interface BatchClose {
-  reason: "settle_timer" | "idle" | "carried";
+  reason: "settle_timer" | "idle" | "step_completed" | "carried";
   waitedMs: number;
 }
+
+/** Terminal status of the SDK run once `run.stream()` drained and `run.wait()` settled. */
+export type RunSettleStatus = SdkRunResult["status"] | "threw";
 
 /** Clock stamps for one HTTP response segment; numbers only, never payloads. */
 export interface SegmentTiming {
@@ -27,8 +30,19 @@ export interface SegmentTiming {
   agentReadyAt?: number;
   firstEventAt?: number;
   firstDeliveryAt?: number;
+  /** Latest content or token delta, or tool callback: the last thing the model produced. */
+  lastDeltaAt?: number;
+  /** Smallest announce → execute gap across the batch; absent when no call was announced first. */
+  announceLeadMs?: number;
+  /** Executes the SDK never announced first: the idle close cannot see these coming. */
+  unannouncedCalls?: number;
+  /** Longest quiet gap between SDK signals while the batch was open; the idle window must exceed it. */
+  batchSilenceMs?: number;
   firstToolAt?: number;
   lastToolAt?: number;
+  turnEndedAt?: number;
+  /** run.stream() drained and run.wait() settled; after publish when the final rode turn-ended. */
+  runSettledAt?: number;
   publishedAt?: number;
   toolCount: number;
   /** Calls that arrived after the previous batch closed and opened this segment. */
@@ -105,6 +119,20 @@ export class EventPump {
    * discards model output.
    */
   private carried: Array<{ kind: "text" | "thinking"; text: string } | { kind: "tool"; call: PendingCall }> = [];
+  /**
+   * Custom tool calls the model has started emitting whose execute has not
+   * fired yet, by the clock time of the announce. While any is outstanding the
+   * batch is still being generated, so the idle close stays disarmed; the
+   * settle cap still applies.
+   */
+  private readonly announced = new Map<string, number>();
+  /** The model call that produced the open batch has finished generating. */
+  private stepCompleted = false;
+  /** Clock time of the latest SDK signal of any kind, for the batch silence metric. */
+  private lastSignalAt?: number;
+  private settledStatus?: RunSettleStatus;
+  /** The segment's final was published on `turn-ended`, ahead of the run settling. */
+  private finalFromTurnEnded = false;
   lastBatchClose?: BatchClose;
   timing: SegmentTiming;
 
@@ -141,15 +169,26 @@ export class EventPump {
   timingSummary(): Record<string, number> {
     const t = this.timing;
     const since = (at?: number) => (at === undefined ? undefined : at - t.startedAt);
+    const between = (from?: number, to?: number) => (from === undefined || to === undefined ? undefined : to - from);
     const fields: Record<string, number | undefined> = {
       agent_ready_ms: since(t.agentReadyAt),
       first_sdk_event_ms: since(t.firstEventAt),
       first_client_write_ms: since(t.firstDeliveryAt),
+      turn_ended_ms: since(t.turnEndedAt),
+      run_settled_ms: since(t.runSettledAt),
       duration_ms: since(t.publishedAt),
+      // Gateway-visible wait between the model's last output and the published stop.
+      publish_lag_ms: between(t.lastDeltaAt, t.publishedAt),
+      // How long the SDK took to make the run terminal after the client had its final:
+      // the most a follow-up send that lands in that window waits.
+      settle_lag_ms: this.finalFromTurnEnded ? between(t.publishedAt, t.runSettledAt) : undefined,
       ...(t.toolCount > 0
         ? {
             tool_count: t.toolCount,
-            tool_spread_ms: t.lastToolAt !== undefined && t.firstToolAt !== undefined ? t.lastToolAt - t.firstToolAt : undefined,
+            tool_spread_ms: between(t.firstToolAt, t.lastToolAt),
+            announce_lead_ms: t.announceLeadMs,
+            unannounced_calls: t.unannouncedCalls,
+            batch_silence_ms: t.batchSilenceMs,
             batch_close_wait_ms: this.lastBatchClose?.waitedMs,
             carried_count: t.carriedCount,
           }
@@ -174,6 +213,11 @@ export class EventPump {
     this.segmentMessageId = messageId();
     this.lastCallAt = undefined;
     this.lastBatchClose = undefined;
+    this.stepCompleted = false;
+    this.lastSignalAt = undefined;
+    // The SDK only generates again after every execute resolved, so nothing
+    // announced before this point can still belong to the next batch.
+    this.announced.clear();
     const now = this.clock.now();
     this.timing = { startedAt: now, agentReadyAt: now, toolCount: 0 };
     if (this.carried.length === 0) return;
@@ -206,13 +250,19 @@ export class EventPump {
   }
 
   notifyTool(call: PendingCall): void {
+    const now = this.clock.now();
+    const announcedAt = this.announced.get(call.toolUseId);
+    this.announced.delete(call.toolUseId);
     if (this.publishedBoundary?.type === "tools") {
       this.carried.push({ kind: "tool", call });
       return;
     }
+    if (announcedAt === undefined) this.timing.unannouncedCalls = (this.timing.unannouncedCalls ?? 0) + 1;
+    else this.timing.announceLeadMs = Math.min(this.timing.announceLeadMs ?? Infinity, now - announcedAt);
     this.markFirstEvent();
-    this.openCall(call);
-    this.armIdleClose();
+    this.openCall(call, now);
+    this.evaluateClose();
+    // Settle is the cap: it fires whatever the announce or step signals said.
     const generation = ++this.settleGeneration;
     const flush = () => {
       if (generation !== this.settleGeneration || this.finished) return;
@@ -226,17 +276,32 @@ export class EventPump {
   }
 
   /**
-   * Optional early close: the model dispatches the calls of one generation
-   * while its delta stream is still active, and goes silent once the last one
-   * is out. Every callback and every delta re-arms the window; the settle
-   * timer remains the cap, and a wrong close is survivable because a later
-   * call is carried into the next batch.
+   * Close an open batch as soon as the model is provably done with it: the
+   * step that produced it completed, or no announced call is still waiting
+   * for its execute and the SDK has gone quiet for the idle window. While an
+   * announced call is outstanding nothing is armed; its execute re-evaluates.
+   * A wrong close is survivable because a later call is carried into the next
+   * batch, and the settle timer remains the cap.
    */
+  private evaluateClose(): void {
+    if (this.openBatch.length === 0 || this.finished) return;
+    if (this.announced.size > 0) {
+      this.idleGeneration += 1;
+      return;
+    }
+    if (this.stepCompleted) {
+      this.flushToolBatch("step_completed");
+      return;
+    }
+    this.armIdleClose();
+  }
+
   private armIdleClose(): void {
-    if (this.idleMs <= 0 || this.openBatch.length === 0) return;
+    if (this.idleMs <= 0) return;
     const generation = ++this.idleGeneration;
     void this.clock.sleep(this.idleMs).then(() => {
       if (generation !== this.idleGeneration || this.finished || this.openBatch.length === 0) return;
+      if (this.announced.size > 0) return;
       this.flushToolBatch("idle");
     });
   }
@@ -250,6 +315,16 @@ export class EventPump {
     });
   }
 
+  /**
+   * Resolves once `run.stream()` drained and `run.wait()` settled, with the
+   * run's terminal status. A final that rode `turn-ended` is published before
+   * this point, and the SDK refuses a new send on the agent until its store
+   * holds the run as terminal, so a follow-up must wait here first.
+   */
+  runSettled(): Promise<RunSettleStatus> {
+    return (this.consumer ?? Promise.resolve()).then(() => this.settledStatus ?? "finished");
+  }
+
   /** Replay events that arrived before this pump existed, in arrival order. */
   ingestEarly(events: EarlyEvent[]): void {
     for (const event of events) {
@@ -260,12 +335,67 @@ export class EventPump {
 
   ingestDelta(update: SdkDeltaUpdate): void {
     this.markFirstEvent();
+    const now = this.clock.now();
+    this.noteSignal(now);
+    if (update.type === "tool-call-announced") {
+      // Already executed (or replayed): nothing is outstanding for this id.
+      if (this.session.pending.has(update.callId)) return;
+      this.announced.set(update.callId, now);
+      // The batch is about to grow; a pending idle close is no longer authoritative.
+      this.idleGeneration += 1;
+      return;
+    }
+    if (update.type === "step-completed") {
+      this.stepCompleted = true;
+      this.evaluateClose();
+      return;
+    }
+    if (update.type === "step-started") {
+      this.stepCompleted = false;
+      return;
+    }
+    if (update.type === "turn-ended") {
+      this.timing.turnEndedAt = now;
+      this.stepCompleted = false;
+      this.publishFinalFromTurnEnded(update.usage);
+      return;
+    }
     // Any delta while a batch is open means the model is still generating it.
-    this.armIdleClose();
-    if (update.type === "turn-ended" || update.type === "token-delta") return;
+    this.timing.lastDeltaAt = now;
+    this.stepCompleted = false;
+    this.evaluateClose();
+    if (update.type === "token-delta") return;
     if (!update.text) return;
     this.preferOnDelta = true;
     this.record(update.type === "thinking-delta" ? "thinking" : "text", update.text);
+  }
+
+  /**
+   * `turn-ended` is the SDK's own end-of-turn signal and carries the turn's
+   * usage; the run's stream EOF and wait() only confirm it later. Publish the
+   * final boundary here when the streamed journal already holds the answer,
+   * and leave the EOF path for turns whose text arrives only in the result.
+   */
+  private publishFinalFromTurnEnded(turnUsage?: SdkUsage): void {
+    if (this.finished || this.openBatch.length > 0 || this.publishedBoundary) return;
+    if (!this.journalHas("text")) return;
+    // Never trade usage for latency: without a number here, wait() still reports one.
+    const usage = turnUsage ?? this.run.usage;
+    if (!usage) return;
+    this.session.usageConfirmed = true;
+    this.session.hasSemanticOutput = true;
+    this.finalFromTurnEnded = true;
+    this.publish({
+      type: "final",
+      turn: {
+        messageId: this.segmentMessageId,
+        sessionId: this.session.sessionId,
+        model: this.session.modelId,
+        stopReason: "end_turn",
+        blocks: blocksFromJournal(this.deltaHistory),
+        usage: fromSdkUsage(usage),
+      },
+    });
   }
 
   /** Run liveness for the first-event timeout, plus the per-segment stamp. */
@@ -274,14 +404,29 @@ export class EventPump {
     this.timing.firstEventAt ??= this.clock.now();
   }
 
+  /**
+   * Record the longest quiet gap the idle window had to outlast while the
+   * batch was open. Announces count as signals: they are what keeps a slow
+   * sibling's batch whole. The gap that finally closed the batch is not
+   * included, since it is the idle window itself.
+   */
+  private noteSignal(now: number): void {
+    if (this.openBatch.length > 0 && this.lastSignalAt !== undefined) {
+      this.timing.batchSilenceMs = Math.max(this.timing.batchSilenceMs ?? 0, now - this.lastSignalAt);
+    }
+    this.lastSignalAt = now;
+  }
+
   /** Add a call to the open batch, the journal, and attached sinks. */
-  private openCall(call: PendingCall): void {
+  private openCall(call: PendingCall, now = this.clock.now()): void {
+    this.noteSignal(now);
     this.session.hasSemanticOutput = true;
     this.session.sawToolBatch = true;
     this.openBatch.push(call);
-    this.lastCallAt = this.clock.now();
+    this.lastCallAt = now;
     this.timing.firstToolAt ??= this.lastCallAt;
     this.timing.lastToolAt = this.lastCallAt;
+    this.timing.lastDeltaAt = this.lastCallAt;
     this.timing.toolCount += 1;
     const block = toolUseBlock(call);
     this.deltaHistory.push({ kind: "tool_use", block });
@@ -304,6 +449,8 @@ export class EventPump {
       this.carried.push({ kind, text });
       return;
     }
+    // A stream snapshot trailing a final that already rode turn-ended repeats streamed text.
+    if (this.finished) return;
     this.session.hasSemanticOutput = true;
     this.deltaHistory.push({ kind, text });
     this.deliver((sink) => (kind === "thinking" ? sink.onThinking?.(text) : sink.onText?.(text)));
@@ -331,6 +478,7 @@ export class EventPump {
       // Stream EOF is progress; do not empty-fail before wait().
       this.markFirstEvent();
       const result = await this.run.wait();
+      this.settledStatus = result.status;
       if (this.finished) return;
       if (result.status === "error") {
         this.fail(sdkFailure(result.error?.message ?? "SDK run error"));
@@ -364,9 +512,11 @@ export class EventPump {
         },
       });
     } catch (error) {
+      this.settledStatus ??= "threw";
       this.fail(sdkFailure(error));
     } finally {
       this.finished = true;
+      this.timing.runSettledAt = this.clock.now();
       void firstTimer;
     }
   }
@@ -383,9 +533,13 @@ export class EventPump {
     if (this.openBatch.length === 0 || this.finished) return;
     const batch = this.openBatch;
     this.openBatch = [];
-    // Invalidate any settle or idle timer still pending for this batch.
+    // Invalidate any settle or idle timer still pending for this batch. An
+    // announce the settle cap outran is dropped here; its execute is carried.
     this.settleGeneration += 1;
     this.idleGeneration += 1;
+    this.announced.clear();
+    this.stepCompleted = false;
+    this.lastSignalAt = undefined;
     this.lastBatchClose = { reason, waitedMs: this.clock.now() - (this.lastCallAt ?? this.clock.now()) };
     this.lastCallAt = undefined;
     const blocks = blocksFromJournal(this.deltaHistory);
@@ -412,6 +566,9 @@ export class EventPump {
   }
 
   private publish(boundary: PumpBoundary): void {
+    // A final that rode turn-ended is terminal; the run's later EOF, wait() or
+    // transport error must not replace what the client already received.
+    if (this.publishedBoundary?.type === "final") return;
     if (boundary.type === "final") this.finished = true;
     if (boundary.type !== "error") this.timing.publishedAt = this.clock.now();
     this.publishedBoundary = boundary;

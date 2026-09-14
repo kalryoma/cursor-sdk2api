@@ -32,8 +32,18 @@ export type FakeStep =
       trailingTextDelayMs?: number;
       /** Offsets (ms from step start) at which a token-delta shows the model still generating. */
       activity?: number[];
+      /** Emit `tool-call-announced` this long before each call's execute, as the SDK streams the call. */
+      announceLeadMs?: number;
+      /** Offset (ms from step start) of the `step-completed` delta that ends the model call. */
+      stepCompletedAfterMs?: number;
     }
   | { type: "silent-final"; text: string }
+  /**
+   * Emit `turn-ended` now and keep the run open this long before the stream
+   * ends and wait() settles. A following `error` step ends the run as an error
+   * after the client already received its final.
+   */
+  | { type: "wind-down"; ms: number }
   | { type: "empty" }
   | { type: "error"; message: string }
   | { type: "send-error"; message: string; name?: string }
@@ -100,6 +110,10 @@ class AsyncQueue<T> implements AsyncIterable<T> {
     else this.items.push(item);
   }
 
+  get isEnded(): boolean {
+    return this.ended;
+  }
+
   end(): void {
     if (this.ended) return;
     this.ended = true;
@@ -139,6 +153,7 @@ export class FakeRun implements SdkRun {
   private scriptStarted = false;
   private hanging = false;
   private earlyOnDeltaRemaining = 0;
+  private turnEnded = false;
 
   constructor(
     private readonly script: FakeStep[],
@@ -155,8 +170,20 @@ export class FakeRun implements SdkRun {
     this.earlyOnDeltaRemaining = earlyOnDeltaRemaining;
   }
 
+  /** Mirrors the SDK store: a follow-up send is refused until the run is terminal. */
+  get terminal(): boolean {
+    return this.events.isEnded;
+  }
+
   async emitEarlyForTest(update: SdkDeltaUpdate): Promise<void> {
     await this.emitDelta(update);
+  }
+
+  /** The SDK's own end-of-turn delta, once per run, ahead of the stream EOF and wait(). */
+  private async endTurn(finalText: string): Promise<void> {
+    if (this.turnEnded || !this.onDelta || !finalText || !this.finalUsage) return;
+    this.turnEnded = true;
+    await this.emitDelta({ type: "turn-ended", usage: this.finalUsage });
   }
 
   private async emitDelta(update: SdkDeltaUpdate): Promise<void> {
@@ -171,13 +198,27 @@ export class FakeRun implements SdkRun {
    */
   private async runToolStep(step: FakeToolStep): Promise<void> {
     const calls = step.calls.map((call) => ({ ...call, id: call.id ?? `sdk_${randomUUID()}` }));
-    const activity = (step.activity ?? []).map((at) =>
+    const timers = (step.activity ?? []).map((at) =>
       setTimeout(() => {
         void this.emitDelta({ type: "token-delta", tokens: 1 });
       }, at),
     );
+    if (step.stepCompletedAfterMs !== undefined) {
+      timers.push(
+        setTimeout(() => {
+          void this.emitDelta({ type: "step-completed", stepId: 1, durationMs: step.stepCompletedAfterMs ?? 0 });
+        }, step.stepCompletedAfterMs),
+      );
+    }
+    const announce = async (call: (typeof calls)[number]) => {
+      if (step.announceLeadMs === undefined) return;
+      const at = Math.max(0, (call.delayMs ?? 0) - step.announceLeadMs);
+      if (at > 0) await new Promise((resolve) => setTimeout(resolve, at));
+      await this.emitDelta({ type: "tool-call-announced", callId: call.id, toolName: call.name });
+    };
     const results = calls.map((call) =>
       (async () => {
+        void announce(call);
         if (call.delayMs) await new Promise((resolve) => setTimeout(resolve, call.delayMs));
         const tool = this.tools[call.name];
         if (!tool) throw new Error(`fake sdk missing tool ${call.name}`);
@@ -201,7 +242,7 @@ export class FakeRun implements SdkRun {
     try {
       await Promise.all(results);
     } finally {
-      for (const timer of activity) clearTimeout(timer);
+      for (const timer of timers) clearTimeout(timer);
     }
   }
 
@@ -261,6 +302,9 @@ export class FakeRun implements SdkRun {
           finalText = step.text;
         } else if (step.type === "empty") {
           finalText = "";
+        } else if (step.type === "wind-down") {
+          await this.endTurn(finalText);
+          await new Promise((resolve) => setTimeout(resolve, step.ms));
         } else if (step.type === "error") {
           this.result = { id: this.id, status: "error", error: { message: step.message } };
           this.events.end();
@@ -277,9 +321,7 @@ export class FakeRun implements SdkRun {
         result: finalText || undefined,
         usage: this.finalUsage,
       };
-      if (this.onDelta && finalText && this.finalUsage) {
-        await this.emitDelta({ type: "turn-ended", usage: this.finalUsage });
-      }
+      await this.endTurn(finalText);
       this.events.end();
     } catch (error) {
       this.result = {
@@ -328,6 +370,12 @@ export class FakeAgent implements SdkAgent {
       const error = new Error(sendError.message);
       if (sendError.name) error.name = sendError.name;
       throw error;
+    }
+    // Live SDK: createFollowUpRun refuses while the agent's active run is not
+    // terminal in its store; local.force expires that run first.
+    const active = this.runs.at(-1);
+    if (active && !active.terminal && sendInput.force !== true) {
+      throw new Error(`Agent ${this.agentId} already has active run`);
     }
     // The leading run of early steps fires here, in script order, so a test can
     // interleave early deltas and synchronous tool dispatch the way the live
